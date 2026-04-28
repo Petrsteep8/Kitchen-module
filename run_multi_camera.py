@@ -436,45 +436,6 @@ def main():
         action_detector.start()
         logger.info("Started ActionDetector")
 
-        demo = [
-            {
-                "event_type": "ACTION_START",
-                "action_id": "A1",
-                "employee_id": 12,
-                "zone_id": "cutting_board",
-                "camera_id": "Kitchen_1",
-                "action_type": "cut",
-                "timestamp_start": 100.0,
-            },
-            {
-                "event_type": "ACTION_END",
-                "action_id": "A1",
-                "employee_id": 12,
-                "zone_id": "cutting_board",
-                "camera_id": "Kitchen_1",
-                "action_type": "cut",
-                "timestamp_start": 100.0,
-                "timestamp_end": 104.5,
-                "end_reason": "left_zone",
-                "employee_confidence": 0.91,
-                "carrying_tool": False,
-                "carrying_food": True,
-                "sanitary_events": [
-                    {"type": "PROCESS_EVENT", "code": "food_handoff"},
-                    {"type": "SANITARY_VIOLATION", "code": "intrusion_work_zone"},
-                ],
-            },
-            {
-                "event_type": "ACTION_START",
-                "action_id": "A2",
-                "employee_id": 12,
-                "zone_id": "cutting_board",
-                "camera_id": "Kitchen_1",
-                "action_type": "cut",
-                "timestamp_start": 120.0,
-            },
-        ]
-
         # 5) Router perception -> sanitary + aggregator + action + display
         router = PerceptionRouter(
             in_queue=perception_queue,

@@ -82,7 +82,7 @@ class DBIClient:
             idf = task[0]
             payload = ast.literal_eval(task[1])
             event_type = payload['event_type']
-            url = self._get_url(event_type)
+            url = self._route_url(event_type)
 
             while True:
                 if self._send_request(url, payload):
