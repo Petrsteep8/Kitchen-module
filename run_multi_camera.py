@@ -13,16 +13,16 @@ from typing import Any, Dict, List, Optional
 from collections import defaultdict, deque
 
 # НАШИ МОДУЛИ
-from video_ingestion import CameraWorker
-from ai_perception import PerceptionWorker
-from sanitary_checker import SanitaryChecker
-from action_detector import ActionDetector
-from event_aggregator import EventAggregator
+from kitchen_vision.video_ingestion import CameraWorker
+from kitchen_vision.face.arcface import ArcFaceRecognizer
+from kitchen_vision.face.face_db import FaceDatabase
+from kitchen_vision.ai_perception import PerceptionWorker
+from kitchen_vision.sanitary_checker import SanitaryChecker
+from kitchen_vision.action_detector import ActionDetector
+from kitchen_vision.event_aggregator import EventAggregator
 from kitchen_environment.snapshot_collector.collector import SnapshotCollector
 from kitchen_gateway.dbi_client import DBIClient
 from kitchen_gateway.queue_processor import QueueProcessor
-# from pattern_analyser import MotionPatternAnalyzer
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("run_multi_camera_integrated")
@@ -53,7 +53,7 @@ class MotionPatternDebugTracker:
         self.movement_vectors = defaultdict(lambda: defaultdict(lambda: deque(maxlen=max_len)))
         self.last_seen_ids = defaultdict(dict)
 
-    def _parse_bbox(self, bbox):
+    def parse_bbox(self, bbox):
         try:
             if bbox is None:
                 return None
@@ -84,7 +84,7 @@ class MotionPatternDebugTracker:
         current_ids = set()
 
         for obj in objects:
-            bbox = self._parse_bbox(obj.get("bbox"))
+            bbox = self.parse_bbox(obj.get("bbox"))
             if not bbox:
                 continue
 
@@ -168,7 +168,7 @@ class PerceptionRouter(threading.Thread):
 
                 for obj in enriched.get("objects", []):
                     try:
-                        bbox = self.motion_tracker._parse_bbox(obj.get("bbox"))
+                        bbox = self.motion_tracker.parse_bbox(obj.get("bbox"))
                         if not bbox:
                             obj["motion_pattern"] = None
                             continue
@@ -377,7 +377,13 @@ def main():
         dbi_client = DBIClient(base_url='https://127.0.0.1/api/db_ingest/', secret_key=b'test_key')
         logger.info("DBIClient created")
 
-        event_aggregator = EventAggregator(dbi_client=dbi_client)
+        arcface = ArcFaceRecognizer()
+        logger.info("ArcFaceRecognizer created")
+
+        face_database = FaceDatabase('./face/faces_db.npz', threshold=0.45)
+        logger.info("FaceDatabase created")
+
+        event_aggregator = EventAggregator()
         logger.info("EventAggregator created")
 
         sanitary_checker = SanitaryChecker()
@@ -412,7 +418,8 @@ def main():
             time.sleep(1.0)
 
         # 3) Perception worker
-        perception = PerceptionWorker(in_queue=frame_queue, out_queue=perception_queue)
+        perception = PerceptionWorker(in_queue=frame_queue, out_queue=perception_queue, arc_face_recognizer=arcface,
+                                      face_database=face_database)
         perception.daemon = True
         perception.start()
         logger.info("Started AI perception module")
@@ -467,33 +474,30 @@ def main():
                 "timestamp_start": 120.0,
             },
         ]
-        time.sleep(1.0)
-        for item in demo:
-            event_aggregator.process(item)
 
         # 5) Router perception -> sanitary + aggregator + action + display
-        # router = PerceptionRouter(
-        #     in_queue=perception_queue,
-        #     action_in_queue=action_in_queue,
-        #     display_queue=display_queue,
-        #     event_aggregator=event_aggregator,
-        #     sanitary_checker=sanitary_checker,
-        #     work_zone_polygons=WORK_ZONE_POLYGONS,
-        #     motion_tracker=None,
-        #     snapshot_collector=snapshot_collector,
-        # )
-        # router.start()
-        # logger.info("Started PerceptionRouter")
+        router = PerceptionRouter(
+            in_queue=perception_queue,
+            action_in_queue=action_in_queue,
+            display_queue=display_queue,
+            event_aggregator=event_aggregator,
+            sanitary_checker=sanitary_checker,
+            work_zone_polygons=WORK_ZONE_POLYGONS,
+            motion_tracker=None,
+            snapshot_collector=snapshot_collector,
+        )
+        router.start()
+        logger.info("Started PerceptionRouter")
 
         # 6) Forward action events -> aggregator
-        # action_forwarder = ActionEventForwarder(
-        #     in_queue=action_event_queue,
-        #     event_aggregator=event_aggregator,
-        #     sanitary_checker=sanitary_checker,
-        #     work_zone_polygons=WORK_ZONE_POLYGONS,
-        # )
-        # action_forwarder.start()
-        # logger.info("Started ActionEventForwarder")
+        action_forwarder = ActionEventForwarder(
+            in_queue=action_event_queue,
+            event_aggregator=event_aggregator,
+            sanitary_checker=sanitary_checker,
+            work_zone_polygons=WORK_ZONE_POLYGONS,
+        )
+        action_forwarder.start()
+        logger.info("Started ActionEventForwarder")
 
         # ====================================================
         # UI LOOP

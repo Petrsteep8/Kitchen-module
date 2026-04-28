@@ -7,8 +7,6 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Deque, Dict, Iterable, List, Optional, Set
 
-from kitchen_gateway.dbi_client import DBIClient
-
 logger = logging.getLogger("event_aggregator")
 
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -55,12 +53,10 @@ class EventAggregator:
 
     def __init__(
         self,
-        dbi_client: DBIClient,
         config: Optional[Dict[str, Any]] = None,
         dedup_cache_size: int = 10000,
         finished_action_ttl_sec: float = 300.0,
     ):
-        self.dbi_client = dbi_client
         self.config = self._deep_merge(deepcopy(DEFAULT_CONFIG), config or {})
         self.finished_action_ttl_sec = float(finished_action_ttl_sec)
 
@@ -466,12 +462,7 @@ class EventAggregator:
         self._seen_event_keys.add(key)
 
         payload = deepcopy(event)
-        self._send_dbi(payload)
-
         return payload
-
-    def _send_dbi(self, payload: Dict[str, Any]):
-        self.dbi_client.send_with_queue(payload)
 
     def _make_idempotency_key(self, event: Dict[str, Any]) -> str:
         event_type = event.get("event_type")

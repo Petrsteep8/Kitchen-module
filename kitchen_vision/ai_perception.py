@@ -1,14 +1,11 @@
 # ai_perception.py
 import base64
-import json
 import os
 import threading
 from datetime import datetime, timezone
 import numpy as np
 import cv2
 import logging
-from face.arcface import ArcFaceRecognizer
-from face.face_db import FaceDatabase
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ai_perception")
@@ -166,7 +163,8 @@ def iou_xyxy(boxA, boxB):
     return interArea / union
 
 class PerceptionWorker(threading.Thread):
-    def __init__(self, in_queue, out_queue=None, model_dir="../models", use_deepsort=False, tracker_backend="simple"):
+    def __init__(self, in_queue, arc_face_recognizer, face_database, out_queue=None, model_dir="../models",
+                 use_deepsort=False, tracker_backend="simple"):
         """
         in_queue: queue.Queue() where ingestion puts packets:
                   {"camera_id": str, "frame_id": int, "timestamp": str, "frame": base64_jpeg}
@@ -191,8 +189,8 @@ class PerceptionWorker(threading.Thread):
         self.load_models()
 
         # === ArcFace ===
-        self.arcface = ArcFaceRecognizer(device=DEVICE)
-        self.face_db = FaceDatabase("./face/faces_db.npz", threshold=0.45)
+        self.arcface = arc_face_recognizer
+        self.face_db = face_database
 
         # tracker
         if tracker_backend == "bytetrack" and BYTETRACK_AVAILABLE:
