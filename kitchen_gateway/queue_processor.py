@@ -6,7 +6,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("queue_processor_integrated")
 
 class QueueProcessor:
-    def __init__(self, dbi_client, interval_seconds: int = 30):
+    def __init__(self, dbi_client, interval_seconds: int = 60):
         self.dbi_client = dbi_client
         self.interval = interval_seconds
         self.running = False

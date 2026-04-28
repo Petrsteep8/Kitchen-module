@@ -436,29 +436,29 @@ def main():
         action_detector.start()
         logger.info("Started ActionDetector")
 
-        # 5) Router perception -> sanitary + aggregator + action + display
-        router = PerceptionRouter(
-            in_queue=perception_queue,
-            action_in_queue=action_in_queue,
-            display_queue=display_queue,
-            event_aggregator=event_aggregator,
-            sanitary_checker=sanitary_checker,
-            work_zone_polygons=WORK_ZONE_POLYGONS,
-            motion_tracker=None,
-            snapshot_collector=snapshot_collector,
-        )
-        router.start()
-        logger.info("Started PerceptionRouter")
-
-        # 6) Forward action events -> aggregator
-        action_forwarder = ActionEventForwarder(
-            in_queue=action_event_queue,
-            event_aggregator=event_aggregator,
-            sanitary_checker=sanitary_checker,
-            work_zone_polygons=WORK_ZONE_POLYGONS,
-        )
-        action_forwarder.start()
-        logger.info("Started ActionEventForwarder")
+        # # 5) Router perception -> sanitary + aggregator + action + display
+        # router = PerceptionRouter(
+        #     in_queue=perception_queue,
+        #     action_in_queue=action_in_queue,
+        #     display_queue=display_queue,
+        #     event_aggregator=event_aggregator,
+        #     sanitary_checker=sanitary_checker,
+        #     work_zone_polygons=WORK_ZONE_POLYGONS,
+        #     motion_tracker=None,
+        #     snapshot_collector=snapshot_collector,
+        # )
+        # router.start()
+        # logger.info("Started PerceptionRouter")
+        #
+        # # 6) Forward action events -> aggregator
+        # action_forwarder = ActionEventForwarder(
+        #     in_queue=action_event_queue,
+        #     event_aggregator=event_aggregator,
+        #     sanitary_checker=sanitary_checker,
+        #     work_zone_polygons=WORK_ZONE_POLYGONS,
+        # )
+        # action_forwarder.start()
+        # logger.info("Started ActionEventForwarder")
 
         # ====================================================
         # UI LOOP
@@ -467,7 +467,7 @@ def main():
 
         while True:
             try:
-                out = display_queue.get(timeout=0.5) # display_queue
+                out = perception_queue.get(timeout=0.5) # display_queue
             except queue.Empty:
                 if time.time() - last_alive_check > 5:
                     alive_cams = [w.is_alive() for w in workers]
