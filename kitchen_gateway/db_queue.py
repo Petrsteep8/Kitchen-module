@@ -131,7 +131,7 @@ class DBQueue:
             return data
 
     @retry_on_lock
-    def check_size_and_cleanup(self, max_size_mb: float = 500, max_age_hours: int = 1) -> None:
+    def check_size_and_cleanup(self, max_size_mb: float = 5000, max_age_hours: int = 1) -> None:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             logger.info("Checking size and cleaning up started")
