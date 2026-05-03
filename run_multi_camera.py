@@ -391,12 +391,12 @@ def main():
 
         time.sleep(1.0)
         # 0) QueueProcessor worker
-        queue_processor = QueueProcessor(dbi_client=dbi_client, interval_seconds=10)
+        queue_processor = QueueProcessor(dbi_client=dbi_client, interval_seconds=60)
         queue_processor.start()
         logger.info("QueueProcessor started")
 
         # 1) SnapshotCollector worker
-        snapshot_collector = SnapshotCollector(interval_sec=10)
+        snapshot_collector = SnapshotCollector(interval_sec=60)
         snapshot_collector.start()
         logger.info("SnapshotCollector started")
 

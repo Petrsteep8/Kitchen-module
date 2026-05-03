@@ -7,6 +7,7 @@ import time
 from typing import Any, Dict
 from kitchen_gateway.db_queue import DBQueue
 
+
 import requests
 
 logging.basicConfig(level=logging.INFO)
