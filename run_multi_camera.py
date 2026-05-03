@@ -27,7 +27,6 @@ from kitchen_gateway.queue_processor import QueueProcessor
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("run_multi_camera_integrated")
 
-
 # ============================================================
 # НАСТРОЙКИ
 # ============================================================
