@@ -193,6 +193,7 @@ class SanitaryEventLn(BaseModel):
                              "{}".format(SEVERITY_WARNING), "{}".format(SEVERITY_INFO))
         return self
 
+
 class DataQualityEventLn(BaseModel):
     event_type: str
     data_quality_event_id: str
@@ -247,22 +248,22 @@ class ProcessEventLn(BaseModel):
 
 class AuditClipLn(BaseModel):
     event_type: str
-    audit_clip_event_id: str
+    audit_clip_id: str
     sanitary_event_id: str = Field(default='')
     process_event_id: str = Field(default='')
     data_quality_event_id: str = Field(default='')
 
-    @field_validator('audit_clip_event_id', mode='before')
+    @field_validator('audit_clip_id', mode='before')
     @classmethod
-    def validate_audit_clip_event_id(cls, v):
+    def validate_audit_clip_id(cls, v):
         if isinstance(v, str):
             try:
                 v = uuid.UUID(v)
                 return str(v)
             except ValueError:
-                raise ValueError("Cannot convert audit_clip_event_id to UUID4")
+                raise ValueError("Cannot convert audit_clip_id to UUID4")
         else:
-            raise ValueError("Audit_clip_event_id must be UUID4")
+            raise ValueError("Audit_clip_id must be UUID4")
 
     @field_validator('sanitary_event_id', mode='before')
     @classmethod
@@ -308,10 +309,11 @@ class AuditClipLn(BaseModel):
 
 
 # TESTS
-sanitary_data = {'event_type': 'SANITARY_EVENT', 'sanitary_event_id': str(uuid.uuid4()), 'sanitary_event': 'no_cap',
-                 'severity': 'violation', 'severity_iternal': 'violation', 'escalation_category': '',}
-try:
-    sanitary = SanitaryEventLn(**sanitary_data)
-    print(sanitary.model_dump())
-except ValueError as e:
-    print(e)
+if __name__ == '__main__':
+    sanitary_data = {'event_type': 'SANITARY_EVENT', 'sanitary_event_id': str(uuid.uuid4()), 'sanitary_event': 'no_cap',
+                     'severity': 'violation', 'severity_iternal': 'violation', 'escalation_category': '',}
+    try:
+        sanitary = SanitaryEventLn(**sanitary_data)
+        print(sanitary.model_dump())
+    except ValueError as e:
+        print(e)

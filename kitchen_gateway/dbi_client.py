@@ -4,8 +4,11 @@ import json
 import logging
 import ast
 import time
+import uuid
 from typing import Any, Dict
-from kitchen_gateway.db_queue import DBQueue
+from db_queue import DBQueue
+from pydantic_models import ActionEventLn, HygieneCheckLn, EnvironmentStateLn, SanitaryEventLn, DataQualityEventLn, \
+                            ProcessEventLn, AuditClipLn
 
 
 import requests
@@ -15,7 +18,7 @@ logger = logging.getLogger("dbi_client_integrated")
 
 
 class DBIClient:
-    def __init__(self, base_url: str, secret_key: bytes):
+    def __init__(self, base_url: str = 'https://localhost/api/ingest/', secret_key: bytes = None):
         self._base_url = base_url
         self._secret_key = secret_key
         self._session = requests.Session()
@@ -23,18 +26,20 @@ class DBIClient:
 
     def _generate_signature(self, payload: Dict[str, Any]) -> str:
         message = json.dumps(payload, sort_keys=True)
-        signature = hmac.new(
-            self._secret_key,
-            message.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
+        signature = hmac.new(self._secret_key, message.encode('utf-8'), hashlib.sha256).hexdigest()
         return signature
 
-    def _send_request(self, endpoint: str, payload: Dict[str, Any]) -> bool:
+    def _send_request(self, event_type: str, endpoint: str, payload: Dict[str, Any]) -> bool:
         url = f"{endpoint}"
         signature = self._generate_signature(payload)
         timestamp = str(int(time.time()))
-        headers = {'Content-Type': 'application/json', 'X-Signature': signature, 'X-Timestamp': timestamp }
+        if event_type == 'AUDIT_CLIP':
+            headers = {'Content-Type': 'application/json', 'X-Signature': signature,
+                       'X-Timestamp': timestamp, 'clip_id': payload['audit_clip_event_id']}
+        else:
+            headers = {'Content-Type': 'application/json', 'X-Signature': signature,
+                       'X-Timestamp': timestamp, f'{payload['event_type'].lower()}_id':
+                           payload[f'{payload['event_type'].lower()}_id']}
 
         try:
             response = self._session.post(url, json=payload, headers=headers, timeout=20, verify=True)
@@ -47,17 +52,74 @@ class DBIClient:
 
     def _route_url(self, event_type) -> str:
         url = ''
-        if event_type == 'ACTION_START':
-            url = self._base_url + 'action_events'
-        elif event_type == 'ACTION_END':
-            url = self._base_url + 'action_events'
-        elif event_type == 'ACTION_INTERRUPTION':
-            url = self._base_url + 'action_events'
-        elif event_type == 'ZONE_RISK_SCORE':
-            url = self._base_url + 'environment_state'
+        if event_type == 'ACTION_EVENT':
+            url = self._base_url + 'action-event'
+        elif event_type == 'HYGIENE_CHECK':
+            url = self._base_url + 'hygiene-check'
         elif event_type == 'SANITARY_EVENT':
-            url = self._base_url + 'violations'
+            url = self._base_url + 'sanitary-event'
+        elif event_type == 'PROCESS_EVENT':
+            url = self._base_url + 'process-event'
+        elif event_type == 'DATA_QUALITY_EVENT':
+            url = self._base_url + 'data-quality-event'
+        elif event_type == 'ENVIRONMENT_STATE':
+            url = self._base_url + 'environment-state'
+        elif event_type == 'AUDIT_CLIP':
+            url = self._base_url + 'audit-clips'
         return url
+
+    def validate_payload(self, event_type: str, payload: Dict[str, Any]) -> bool:
+        print(event_type)
+        if event_type == 'ACTION_EVENT':
+            try:
+                action = ActionEventLn(**payload)
+                print(action.model_dump())
+            except ValueError as e:
+                print(e)
+                return False
+        elif event_type == 'HYGIENE_CHECK':
+            try:
+                hygiene = HygieneCheckLn(**payload)
+                print(hygiene.model_dump())
+            except ValueError as e:
+                print(e)
+                return False
+        elif event_type == 'SANITARY_EVENT':
+            try:
+                sanitary = SanitaryEventLn(**payload)
+                print(sanitary.model_dump())
+            except ValueError as e:
+                print(e)
+                return False
+        elif event_type == 'PROCESS_EVENT':
+            try:
+                process = ProcessEventLn(**payload)
+                print(process.model_dump())
+            except ValueError as e:
+                print(e)
+                return False
+        elif event_type == 'DATA_QUALITY_EVENT':
+            try:
+                data_quality = DataQualityEventLn(**payload)
+                print(data_quality.model_dump())
+            except ValueError as e:
+                print(e)
+                return False
+        elif event_type == 'ENVIRONMENT_STATE':
+            try:
+                environment = EnvironmentStateLn(**payload)
+                print(environment.model_dump())
+            except ValueError as e:
+                print(e)
+                return False
+        elif event_type == 'AUDIT_CLIP':
+            try:
+                clip = AuditClipLn(**payload)
+                print(clip.model_dump())
+            except ValueError as e:
+                print(e)
+                return False
+        return True
 
     def send_with_queue(self, payload: Dict[str, Any]):
         if len(payload) < 1:
@@ -65,10 +127,12 @@ class DBIClient:
             return
 
         event_type = payload['event_type']
-        url = self._route_url(event_type)
+        if not self.validate_payload(event_type=event_type, payload=payload):
+            return
 
-        if not self._send_request(url, payload):
-            self._db_queue.add_database_event(payload)
+        url = self._route_url(event_type)
+        if not self._send_request(event_type=event_type, endpoint=url, payload=payload):
+            self._db_queue.add_database_event(pkt=payload)
 
     def process_queue(self):
         self._db_queue.check_size_and_cleanup()
@@ -100,3 +164,14 @@ class DBIClient:
                         break
                     time.sleep(retry_delay * (error_counter + 1))
         return None
+
+
+# TESTS
+if __name__ == '__main__':
+    sanitary_data = {'event_type': 'SANITARY_EVENT', 'sanitary_event_id': str(uuid.uuid4()), 'sanitary_event': 'no_cap',
+                     'severity': 'violation', 'severity_iternal': 'violation', 'escalation_category': '',}
+    db = DBIClient()
+    if db.validate_payload(event_type='SANITARY_EVENT', payload=sanitary_data):
+        print(1)
+    else:
+        print(0)
