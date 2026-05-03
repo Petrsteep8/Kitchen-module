@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import uuid
 
 # SANITARY-СОБЫТИЯ
@@ -153,7 +153,7 @@ class SanitaryEventLn(BaseModel):
     sanitary_event_id: str
     sanitary_event: str
     severity: str
-    severity_iternal: str
+    severity_iternal: str = Field(exclude=True)
     escalation_category: str = Field(default='')
 
     @field_validator('sanitary_event_id', mode='before')
@@ -180,19 +180,18 @@ class SanitaryEventLn(BaseModel):
                         "{}".format(INTRUSION_CONTROL), "{}".format(PROCESS_EVENTS),
                         "{}".format(DATA_QUALITY_EVENTS))
 
-    @field_validator('severity_iternal', mode='before')
-    @classmethod
-    def map_severity_iternal(cls, v):
-        if v in SEVERITY_VIOLATION:
-            v = 'violation'
-        elif v in SEVERITY_VIOLATION:
-            v = 'warning'
-        elif v in SEVERITY_INFO:
-            v = 'info'
+    @model_validator(mode='after')
+    def map_severity_iternal(self):
+        if self.severity_iternal in SEVERITY_VIOLATION:
+            self.severity = 'violation'
+        elif self.severity_iternal in SEVERITY_VIOLATION:
+            self.severity = 'warning'
+        elif self.severity_iternal in SEVERITY_INFO:
+            self.severity = 'info'
         else:
             raise ValueError("Severity_iternal must be in SEVERITY_TYPES: {}".format(SEVERITY_VIOLATION),
                              "{}".format(SEVERITY_WARNING), "{}".format(SEVERITY_INFO))
-        return v
+        return self
 
 class DataQualityEventLn(BaseModel):
     event_type: str
