@@ -31,7 +31,7 @@ def retry_on_lock(func: Callable) -> Callable:
 
 
 class DBQueue:
-    def __init__(self, db_path: str = '../kitchen_gateway/queue.db'):
+    def __init__(self, db_path: str = './kitchen_gateway/queue.db'):
         self.db_path = db_path
         self._local = threading.local()
         self._lock = threading.RLock()
@@ -68,6 +68,7 @@ class DBQueue:
             yield conn
             conn.commit()
         except sqlite3.Error as e:
+            print(self.db_path)
             if conn:
                 conn.rollback()
             logger.error(f"Database error: {e}")
@@ -185,6 +186,6 @@ class DBQueue:
 
 # TESTS
 if __name__ == '__main__':
-    db_queue = DBQueue(db_path='queue.db')
+    db_queue = DBQueue(db_path='../queue.db')
     db_queue.add_database_event(pkt={"event_type": "SANITARY_EVENT", "action_id": str(uuid.uuid4())})
     db_queue.check_size_and_cleanup()
