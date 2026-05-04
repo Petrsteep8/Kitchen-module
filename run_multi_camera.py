@@ -5,10 +5,6 @@ import queue
 import threading
 import time
 import warnings
-
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
-
 from typing import Any, Dict, List, Optional
 from collections import defaultdict, deque
 
@@ -24,12 +20,18 @@ from kitchen_environment.snapshot_collector.collector import SnapshotCollector
 from kitchen_gateway.dbi_client import DBIClient
 from kitchen_gateway.queue_processor import QueueProcessor
 
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("run_multi_camera_integrated")
 
-# ============================================================
-# НАСТРОЙКИ
-# ============================================================
+DBI_CLIENT_BASE_URL = 'https://localhost:8000/api/ingest'
+DBI_CLIENT_KEY = b'test_key'
+
+FACE_DATABASE_PATH = './kitchen_vision/face/faces_db.npz'
+FACE_DATABASE_THRESHOLD = 0.45
+
 CAMERAS = [
     {
         "camera_id": "Kitchen_1",
@@ -39,8 +41,7 @@ CAMERAS = [
 TARGET_FPS = 3
 RESOLUTION = (640, 480)
 
-# Формат зависит от ActionDetector. Если он ожидает polygon по camera_id,
-# оставь словарь такого вида.
+# Формат зависит от ActionDetector. Если он ожидает polygon по camera_id, оставь словарь такого вида.
 WORK_ZONE_POLYGONS: Dict[str, List[List[float]]] = {
     "Kitchen_1": [],
 }
@@ -373,13 +374,13 @@ def main():
         # logger.info("Pattern analyser loaded: %s", type(pattern_analyser).__name__)
         # logger.info("Pattern analyser loaded: %s", type(pattern_analyser).__name__)
 
-        dbi_client = DBIClient(base_url='https://127.0.0.1/api/db_ingest/', secret_key=b'test_key')
+        dbi_client = DBIClient(base_url=DBI_CLIENT_BASE_URL, secret_key=DBI_CLIENT_KEY)
         logger.info("DBIClient created")
 
         arcface = ArcFaceRecognizer()
         logger.info("ArcFaceRecognizer created")
 
-        face_database = FaceDatabase('./face/faces_db.npz', threshold=0.45)
+        face_database = FaceDatabase(path=FACE_DATABASE_PATH, threshold=FACE_DATABASE_THRESHOLD)
         logger.info("FaceDatabase created")
 
         event_aggregator = EventAggregator()
@@ -417,8 +418,8 @@ def main():
             time.sleep(1.0)
 
         # 3) Perception worker
-        perception = PerceptionWorker(in_queue=frame_queue, out_queue=perception_queue, arc_face_recognizer=arcface,
-                                      face_database=face_database)
+        perception = PerceptionWorker(in_queue=frame_queue, out_queue=perception_queue,
+                                      arc_face_recognizer=arcface, face_database=face_database)
         perception.daemon = True
         perception.start()
         logger.info("Started AI perception module")
@@ -466,7 +467,7 @@ def main():
 
         while True:
             try:
-                out = perception_queue.get(timeout=0.5) # display_queue
+                out = display_queue.get(timeout=0.5) # display_queue
             except queue.Empty:
                 if time.time() - last_alive_check > 5:
                     alive_cams = [w.is_alive() for w in workers]
