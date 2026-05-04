@@ -128,7 +128,8 @@ class DBQueue:
     def get_database_events(self, limit: int = 5) -> List[sqlite3.Row]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""SELECT * FROM event_queue WHERE status != 'b_completed' LIMIT ?""", (limit,))
+            cursor.execute("""SELECT * FROM event_queue WHERE status != 'b_completed' ORDER BY timestamp_updated
+            LIMIT ?""", (limit,))
             return cursor.fetchall()
 
     @retry_on_lock

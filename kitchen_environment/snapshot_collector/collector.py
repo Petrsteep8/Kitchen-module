@@ -6,7 +6,7 @@ from datetime import datetime
 
 
 class SnapshotCollector:
-    def __init__(self, interval_sec: int = 60, base_dir: str = "../snapshots"):
+    def __init__(self, interval_sec: int = 60, base_dir: str = "./snapshots"):
         self.interval = interval_sec
         self.base_dir = base_dir
 
