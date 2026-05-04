@@ -163,7 +163,7 @@ def iou_xyxy(boxA, boxB):
     return interArea / union
 
 class PerceptionWorker(threading.Thread):
-    def __init__(self, in_queue, arc_face_recognizer, face_database, out_queue=None, model_dir="../models",
+    def __init__(self, in_queue, arc_face_recognizer, face_database, out_queue=None, model_dir="./models",
                  use_deepsort=False, tracker_backend="simple"):
         """
         in_queue: queue.Queue() where ingestion puts packets:
@@ -218,7 +218,6 @@ class PerceptionWorker(threading.Thread):
                     logger.info("Model file created, reloading models")
                     self.outer.load_models()
             handler = ModelChangeHandler(self)
-            os.makedirs(self.model_dir, exist_ok=True)
             self._observer.schedule(handler, self.model_dir, recursive=True)
             self._observer.start()
             logger.info("Watchdog observer started for model hot-reload.")
