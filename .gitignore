@@ -1,1 +1,3 @@
 queue.db
+queue.db-shm
+queue.db-wal
