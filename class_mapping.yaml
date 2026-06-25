@@ -1,0 +1,83 @@
+# class_mapping.yaml
+# Канонический справочник классов Kitchen Module (ТЗ v2.2 §11.2).
+#
+# Назначение: ЕДИНСТВЕННАЯ точка, где сырые имена классов детекторов приводятся
+# к 19 каноническим классам. Правила/FSM/нарушения ссылаются ТОЛЬКО на канонические
+# имена; DBI маппинг подклассов не хранит (это конфиг ML-пайплайна).
+# Принцип §1.2 п.5 «конфигурация вместо кода»: ai_perception ЧИТАЕТ этот файл,
+# а не хардкодит SYNONYM_MAP. Версия файла попадает в model_versions факта (§13.1/§34.2).
+
+version: "1.0.0"                  # бамп при любом изменении набора/маппинга
+markup_version: "km-classes-2026-06"
+
+# --- 19 канонических классов (§11.2) ---
+# source:
+#   coco            — есть в предобученном yolov8s «из коробки», обучать не нужно
+#   glove_model     — кастомный best_glove_model.pt (классы gloved_hand/bare_hand)
+#   pending_dataset — пока НЕ детектируется; нужен сбор/разметка (бутстрап §7) + дообучение
+canonical_classes:
+  person:                    { source: coco,            min_confidence: 0.40 }
+  hands:                     { source: glove_model,     min_confidence: 0.45 }  # из gloved_hand/bare_hand, см. hand_state
+  glove:                     { source: glove_model,     min_confidence: 0.45 }  # присутствие перчатки = состояние gloved
+  knife:                     { source: coco,            min_confidence: 0.45 }
+  cutting_board:             { source: pending_dataset, min_confidence: 0.40 }  # Open Images / kitchen datasets
+  cup:                       { source: coco,            min_confidence: 0.40 }  # ВАЖНО: cup != food (фикс бага SYNONYM_MAP)
+  bottle:                    { source: coco,            min_confidence: 0.40 }  # ВАЖНО: bottle != food
+  phone:                     { source: coco,            min_confidence: 0.45 }  # COCO 'cell phone'
+  food:                      { source: coco,            min_confidence: 0.35 }  # агрегат съедобных классов COCO
+  apron:                     { source: pending_dataset, min_confidence: 0.40 }  # KitchenHygiene / Safety Gloves datasets
+  cap:                       { source: pending_dataset, min_confidence: 0.40 }  # hairnet ≈ cap — проверить соответствие (§7)
+  container:                 { source: pending_dataset, min_confidence: 0.40 }
+  surface:                   { source: pending_dataset, min_confidence: 0.40 }  # сегментация (U-Net/SAM2, ML-9)
+  table:                     { source: pending_dataset, min_confidence: 0.40 }
+  waste:                     { source: pending_dataset, min_confidence: 0.40 }
+  cleaning_inventory:        { source: pending_dataset, min_confidence: 0.40 }
+  dirty_dishes_containers:   { source: pending_dataset, min_confidence: 0.40 }
+  tool:                      { source: pending_dataset, min_confidence: 0.40 }
+  cigarette_or_smoke_object: { source: pending_dataset, min_confidence: 0.50 }  # сигарета+дым, брать датасеты с обоими
+
+# --- Маппинг сырых имён детекторов -> канонический класс ---
+# Имя, которого здесь нет И которое не совпадает с каноническим => DROP
+# (раньше неизвестное имя молча проваливалось «как есть»; теперь явный отброс).
+synonyms:
+  # COCO (yolov8s)
+  person: person
+  knife: knife
+  cup: cup                  # было ошибочно -> food
+  bottle: bottle            # было ошибочно -> food
+  "cell phone": phone        # underscore-вариант cell_phone ловится нормализацией (_->пробел)
+  # съедобное COCO -> food
+  banana: food
+  apple: food
+  sandwich: food
+  orange: food
+  broccoli: food
+  carrot: food
+  "hot dog": food            # underscore-вариант hot_dog ловится нормализацией
+  pizza: food
+  donut: food
+  cake: food
+  bowl: container           # ИЗМЕНЕНО (food->container): иначе миска triggerит ложный critical
+                            # left_zone_with_food (§20.2) и ложный food_consumption (§17). Миска —
+                            # обычно ТАРА, а не еда. Точность важнее полноты (§7.2).
+  # glove-модель (best_glove_model.pt): классы {0: gloved_hand, 1: bare_hand}
+  gloved_hand: hands
+  bare_hand: hands
+
+# --- Состояние рук из glove-модели (§11; контекст-файл §8, «class_mapping») ---
+# gloved_hand/bare_hand -> канонический `hands`, а различие «перчатка/без» фиксируется
+# как АТРИБУТ состояния (а не отдельный объект). Это состояние — источник сигналов
+# glove / no_gloves для поведенческого контура (передаётся в слой интерпретации).
+hand_state:
+  gloved_hand: { canonical: hands, glove_state: gloved, emits: glove }
+  bare_hand:   { canonical: hands, glove_state: bare,   emits: no_gloves }  # bare_hand в рабочей зоне = no_gloves (§11.1)
+
+# --- Глобальные пороги (§30.4) ---
+thresholds:
+  min_confidence_for_violation_source: 0.70   # источник нарушения не принимается ниже этого (анти-FP)
+  default_min_confidence: 0.35                 # если класса нет в canonical_classes.*.min_confidence
+
+notes:
+  - "Покласные min_confidence — БУТСТРАП-значения. Финал выбирается по PR-кривым на приёмочном датасете (§8, реш. Д-03)."
+  - "pending_dataset-классы перечислены, чтобы зафиксировать КОНТРАКТ ИМЁН до обучения: backend кодит правила на эти имена, не дожидаясь моделей (§13.3)."
+  - "yolov8-hand.pt и yolo11n.pt в текущем пайплайне не нужны: hands даёт glove-модель. Держать как запас, по умолчанию не грузить."
