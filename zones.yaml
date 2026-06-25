@@ -1,0 +1,66 @@
+# zones.yaml — разметка зон и калибровка ОДНОЙ точки (§14.1).
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ ⚠ ШАБЛОН. Координаты polygon и калибровка — ПЛЕЙСХОЛДЕРЫ.                  │
+# │ Реальные значения снимаются при онбординге точки (§14.3): съёмка опорных  │
+# │ кадров -> разметка полигонов и опорных точек -> валидация конверта §7.4   │
+# │ -> активация (valid_from) и фиксация markup_version.                      │
+# │ По стратегии холодного старта доступ к камерам появится ПОСЛЕ MVP —       │
+# │ до тех пор резолвер отдаёт zone_id=None (штатно, поле опционально §13.1).  │
+# └─────────────────────────────────────────────────────────────────────────┘
+
+site_id: demo_site_01
+markup_version: zones-demo-0.0.0      # ЛЮБОЕ изменение разметки/калибровки -> бамп + новый rules_config_version (§14.4)
+
+# Каждая запись зоны (§14.1): обязательны zone_id, zone_type, camera_id, polygon, markup_version, valid_from.
+# Доп. поля резолвера (ML-04, из решений §8 контекста):
+#   status_role — ось ЗОНАЛЬНОГО СТАТУСА (§15.3), независимая от zone_type:
+#                 prep | workstation | rest | out | between   (зона отдыха = neutral_zone + status_role: rest)
+#   priority    — для ВЛОЖЕННЫХ полигонов: побеждает самый специфичный (больше priority).
+#
+# zone_type — enum §24.8: dirty_zone | clean_zone | prep_zone | packaging_zone |
+#             reset_zone | waste_zone | wash_zone | neutral_zone | clean_gate
+zones:
+  - zone_id: prep_main            # согласуется со справочником `zones` в DBI (§11.5)
+    zone_type: prep_zone          # санитарный контекст -> clean_zone (§24.8)
+    status_role: prep
+    camera_id: Kitchen_1
+    priority: 10
+    valid_from: 2026-06-24T00:00:00Z
+    polygon: [[120, 80], [520, 80], [520, 360], [120, 360]]   # TODO: реальные пиксели кадра
+
+  - zone_id: wash_station
+    zone_type: wash_zone
+    status_role: workstation
+    camera_id: Kitchen_1
+    priority: 20                  # вложен в prep_main -> выше priority, чтобы победить
+    valid_from: 2026-06-24T00:00:00Z
+    polygon: [[300, 240], [440, 240], [440, 360], [300, 360]]  # TODO
+
+  - zone_id: rest_corner
+    zone_type: neutral_zone
+    status_role: rest
+    camera_id: Kitchen_1
+    priority: 5
+    valid_from: 2026-06-24T00:00:00Z
+    polygon: [[540, 300], [630, 300], [630, 470], [540, 470]]  # TODO
+
+  # --- ОДНА логическая зона на НЕСКОЛЬКИХ камерах (§14.1): ТОТ ЖЕ zone_id, свой polygon на каждой камере ---
+  - zone_id: prep_main          # тот же zone_id, что и на Kitchen_1 выше -> это ОДНА зона, видимая двумя камерами
+    zone_type: prep_zone
+    status_role: prep
+    camera_id: Kitchen_2        # вторая камера на ту же физическую зону (другой ракурс)
+    priority: 10
+    valid_from: 2026-06-24T00:00:00Z
+    polygon: [[60, 40], [380, 40], [380, 300], [60, 300]]   # TODO: пиксели кадра Kitchen_2
+
+# Калибровка пиксель->метр (§14.2). Нужна ТОЛЬКО для правил с метрами (handoff_radius_m и пр.).
+# Достаточно ОДНОГО из: homography (3x3, >=4 опорные точки) ИЛИ px_per_meter (скаляр на камеру).
+calibration:
+  Kitchen_1:
+    # px_per_meter: 130.0          # TODO: измерить (например, известная длина стола / её пиксели)
+    # homography:                  # TODO: cv2.findHomography по >=4 точкам пол<->метры, контроль репроекции
+    #   - [1.0, 0.0, 0.0]
+    #   - [0.0, 1.0, 0.0]
+    #   - [0.0, 0.0, 1.0]
+    hysteresis_m: 0.15             # антидребезг границы в метрах (если есть px_per_meter); иначе дефолт px в коде
