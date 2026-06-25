@@ -1,0 +1,32 @@
+Kitchen Module — сторонние компоненты и лицензии (NOTICE)
+=========================================================
+
+Детекция
+  Ultralytics YOLOv8 — лицензия ENTERPRISE (Ultralytics Enterprise License).
+    Используется по коммерческой Enterprise-лицензии; AGPL-3.0 не применяется.
+    Кастомно дообученные веса (best_glove_model.pt и др.) — продукт проекта под Enterprise.
+
+Трекинг
+  ByteTrack — MIT License (Copyright (c) 2021 Yifu Zhang).
+  supervision (Roboflow) — Apache License 2.0. Содержит реализацию ByteTrack.
+
+Кросс-камерный re-id (appearance)
+  torchreid / deep-person-reid (OSNet) — КОД под MIT License (Kaiyang Zhou).
+  ВНИМАНИЕ ПО ВЕСАМ: публичные веса OSNet обучены на reid-датасетах с лицензиями
+    RESEARCH-ONLY (Market-1501 запрещает коммерческое использование; DukeMTMC отозван).
+    Для коммерческого продукта НЕЛЬЗЯ полагаться на эти публичные чекпойнты «как есть»:
+    обучить OSNet на собственных кадрах кухни или на коммерчески-чистом датасете.
+    Финальный выбор чекпойнта — после юридической проверки.
+
+Идентификация лиц
+  InsightFace (buffalo_l, ArcFace) — проверить условия использования моделей InsightFace
+    под конкретный кейс (отдельная юр-проверка перед продом).
+
+Геометрия зон
+  shapely — BSD-3-Clause.
+
+Общие
+  PyTorch (BSD), OpenCV (Apache-2.0), NumPy (BSD), PyYAML (MIT), pydantic (MIT).
+
+Этот файл фиксирует лицензионный статус на момент сборки. Перед релизом — финальная
+юридическая проверка чекпойнтов моделей (OSNet, InsightFace) и Enterprise-лицензии Ultralytics.

@@ -1,3 +1,9 @@
 queue.db
 queue.db-shm
 queue.db-wal
+*.pem
+openrc.sh
+**/faces_db*.npz
+
+__pycache__/
+*.pyc

@@ -1,0 +1,35 @@
+# requirements.txt — Kitchen Module (заменяет requariments.txt: UTF-16->UTF-8, опечатка в имени, без пинов)
+#
+# Версии ниже — МИНИМУМЫ. Зафиксировать точные на целевом GPU-окружении:
+#   pip freeze > requirements.lock.txt
+# и коммитить lock рядом (воспроизводимость, §8/§44).
+
+# --- детекция/трекинг ---
+ultralytics>=8.2.0          # YOLOv8 (Enterprise License — см. NOTICE). НЕ apt; ставить из PyPI
+supervision>=0.18.0         # ByteTrack (Apache-2.0), per-camera инстансы
+torch>=2.1.0
+torchvision>=0.16.0
+
+# --- идентификация (ArcFace) ---
+insightface>=0.7.3          # buffalo_l
+onnxruntime-gpu>=1.17.0     # для CPU-сборки заменить на onnxruntime
+
+
+# --- кросс-камерный re-id (appearance) ---
+torchreid>=1.4.0            # OSNet (КОД — MIT). ВНИМАНИЕ: публичные веса OSNet обучены на
+                            # research-only датасетах (Market-1501/MSMT17/DukeMTMC) — для
+                            # коммерции чекпойнт обучить на своих/чистых данных (юр-проверка).
+
+# --- геометрия зон ---
+shapely>=2.0.0              # point-in-polygon + гистерезис (буфер)
+
+# --- общие ---
+opencv-python>=4.9.0
+numpy>=1.26.0
+PyYAML>=6.0
+pydantic>=2.6.0             # контракты gateway (backend)
+
+# Примечание: watchdog убран — hot-reload моделей из старого ai_perception удалён вместе с ним.
+
+# --- инструменты (tools/annotate_zones.py) ---
+matplotlib>=3.7.0          # интерактивная разметка зон (нужен дисплей)
