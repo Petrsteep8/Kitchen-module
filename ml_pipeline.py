@@ -41,7 +41,6 @@ def build_identity_enricher(device="cuda", gallery_path="kitchen_vision/face/fac
         logger.exception("IdentityEnricher не собран — идентификация отключена")
         return None
 
-
 class MLPipeline:
     def __init__(self, cameras, devices=("cuda:0",), class_map_path="class_mapping.yaml",
                  zones_path=None, fps=8, sink=None, reid_model_path="",
