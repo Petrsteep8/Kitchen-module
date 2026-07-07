@@ -1,4 +1,3 @@
-# action_detector.py
 import queue
 import time
 import uuid
@@ -45,11 +44,10 @@ class ActionDetector(threading.Thread):
         self.__pattern_analyser = analyser
         self.__detection_threshold = detection_threshold
 
-        # current canonical classes from perception
-        self.__tool_classes = {"knife", "spoon"}
-        self.__key_object_classes = {"knife", "spoon", "food", "cutting_board", "pot", "pan"}
-        self.__container_classes = {"cutting_board", "pot", "pan"}
-        self.__hand_classes = {"bare_hand", "gloved_hand"}
+        self.__tool_classes = {"knife", "tool"}
+        self.__key_object_classes = {"knife", "tool", "food", "cutting_board", "container"}
+        self.__container_classes = {"cutting_board", "container"}
+        self.__hand_classes = {"hands"}
 
         self.__previous_position = defaultdict(dict)
         self.__movement_vectors = defaultdict(lambda: defaultdict(lambda: deque(maxlen=20)))
@@ -74,9 +72,6 @@ class ActionDetector(threading.Thread):
         for cam in cams:
             self.__reset_camera_state(cam)
 
-    # =====================================================
-    # MAIN LOOP
-    # =====================================================
     def run(self):
         while not self.stop_event.is_set():
             try:
@@ -141,9 +136,6 @@ class ActionDetector(threading.Thread):
                 )
                 self.__emit_events([end_event])
 
-    # =====================================================
-    # ACTION POSSIBILITY
-    # =====================================================
     def is_action_possible(self, pkt: Dict) -> bool:
         camera_id = pkt["camera_id"]
         objects = self.__filter_objects(pkt.get("objects", []))
@@ -162,9 +154,6 @@ class ActionDetector(threading.Thread):
         self.__clear_cam_data(camera_id)
         return False
 
-    # =====================================================
-    # MOTION ANALYSIS
-    # =====================================================
     def analyze_motion(self, pkt: Dict):
         camera_id = pkt["camera_id"]
         current_time = time.time()
@@ -210,7 +199,6 @@ class ActionDetector(threading.Thread):
             self.__previous_position[camera_id][uid] = (cx, cy, current_time, bbox)
             self.__last_seen_ids[camera_id][uid] = current_time
 
-        # cleanup disappeared objects
         for uid in list(self.__previous_position[camera_id].keys()):
             if uid not in current_ids:
                 last_ts = self.__last_seen_ids[camera_id].get(uid, 0.0)
@@ -223,10 +211,8 @@ class ActionDetector(threading.Thread):
             dict(self.__movement_vectors[camera_id])
         )
 
-        # сохраняем полный словарь паттернов в packet
         pkt["motion_patterns"] = patterns or {}
 
-        # добавляем паттерн в объекты исходного packet
         for obj in pkt.get("objects", []):
             try:
                 bbox = self.__parse_bbox(obj.get("bbox"))
@@ -247,9 +233,6 @@ class ActionDetector(threading.Thread):
 
         return patterns, center_positions
 
-    # =====================================================
-    # ACTION FSM
-    # =====================================================
     def detect_action(self, patterns, centers, pkt) -> Optional[List[Dict[str, Any]]]:
         camera_id = pkt["camera_id"]
         state = self.__detected_actions[camera_id]
@@ -261,9 +244,6 @@ class ActionDetector(threading.Thread):
         if action is not None:
             self.__update_action_observation_state(camera_id, action, centers, pkt)
 
-        # ==========================================
-        # IDLE
-        # ==========================================
         if state["state"] == "IDLE":
             if action:
                 state.update({
@@ -280,15 +260,11 @@ class ActionDetector(threading.Thread):
                 })
             return None
 
-        # ==========================================
-        # ACTION_CANDIDATE
-        # ==========================================
         if state["state"] == "ACTION_CANDIDATE":
             if action and action["type"] == state["action_type"]:
                 state["last_action_seen_ts"] = now
                 state["last_observed_objects"] = centers
 
-                # refresh employee/key object binding if available
                 if action.get("employee_track_id") is not None:
                     state["employee_track_id"] = action["employee_track_id"]
                 if action.get("employee_id"):
@@ -321,9 +297,6 @@ class ActionDetector(threading.Thread):
                 self.__reset_camera_state(camera_id)
             return None
 
-        # ==========================================
-        # ACTION_ACTIVE
-        # ==========================================
         if state["state"] == "ACTION_ACTIVE":
             if action and action["type"] == state["action_type"]:
                 state["timestamp_end"] = now
@@ -352,34 +325,20 @@ class ActionDetector(threading.Thread):
 
         return None
 
-    # =====================================================
-    # END REASON LOGIC
-    # =====================================================
     def __choose_end_reason(self, camera_id: str, pkt: Dict) -> Optional[str]:
-        """
-        Priority order:
-        1. tracking_lost
-        2. left_zone
-        3. key_object_lost
-        4. motion_stopped
-        """
         now = time.time()
         state = self.__detected_actions[camera_id]
         objects = self.__filter_objects(pkt.get("objects", []))
 
-        # 1) tracking_lost
         if self.__is_tracking_lost(camera_id, objects, now):
             return "tracking_lost"
 
-        # 2) left_zone
         if self.__is_left_zone_confirmed(camera_id, pkt, objects, now):
             return "left_zone"
 
-        # 3) key_object_lost
         if self.__is_key_object_lost(camera_id, objects, now):
             return "key_object_lost"
 
-        # 4) motion_stopped
         if now - state.get("last_motion_seen_ts", 0.0) >= self.__ACTION_END_DELAY:
             return "motion_stopped"
 
@@ -389,7 +348,6 @@ class ActionDetector(threading.Thread):
         state = self.__detected_actions[camera_id]
         employee_track_id = state.get("employee_track_id")
         if employee_track_id is None:
-            # if action was tied to unknown person track, fall back to missing person at all
             person_present = any(obj.get("class") == "person" for obj in objects)
             if person_present:
                 state["tracking_lost_since"] = None
@@ -417,7 +375,6 @@ class ActionDetector(threading.Thread):
     def __is_left_zone_confirmed(self, camera_id: str, pkt: Dict, objects: List[Dict], now: float) -> bool:
         state = self.__detected_actions[camera_id]
 
-        # per requirement: left_zone cannot fire if tracking_lost
         if self.__is_tracking_lost(camera_id, objects, now):
             return False
 
@@ -470,9 +427,6 @@ class ActionDetector(threading.Thread):
 
         return (now - state["key_object_lost_since"]) >= self.__T_KEY_OBJECT_LOST_CONFIRM
 
-    # =====================================================
-    # ACTION START/END PACKETS
-    # =====================================================
     def make_action_start_packet(self, camera_id: str, pkt: Dict) -> Dict[str, Any]:
         d = self.__detected_actions[camera_id]
         return {
@@ -540,9 +494,6 @@ class ActionDetector(threading.Thread):
         self.__reset_camera_state(camera_id)
         return end_event
 
-    # =====================================================
-    # ACTION RECOGNITION
-    # =====================================================
     def __check_hand_item_interaction(self, patterns, centers):
         hands = [c for c in centers if self.__is_hand(c["class"])]
         persons = [c for c in centers if c["class"] == "person"]
@@ -571,7 +522,7 @@ class ActionDetector(threading.Thread):
                         "key_object_class": obj_class,
                     }
 
-                if obj_class in {"pot", "pan"} and hp == "circular":
+                if obj_class == "container" and hp == "circular":
                     return {
                         "type": "mix",
                         "employee_track_id": employee_track_id,
@@ -591,7 +542,7 @@ class ActionDetector(threading.Thread):
                         "key_object_class": obj_class,
                     }
 
-                if obj_class == "spoon" and hp in {"linear", "circular"}:
+                if obj_class == "tool" and hp in {"linear", "circular"}:
                     return {
                         "type": "serve",
                         "employee_track_id": employee_track_id,
@@ -619,9 +570,6 @@ class ActionDetector(threading.Thread):
         if action.get("key_object_class") is not None:
             state["key_object_class"] = action["key_object_class"]
 
-    # =====================================================
-    # EMPLOYEE / CARRYING HELPERS
-    # =====================================================
     def __get_action_employee_object(self, camera_id: str, objects: List[Dict]) -> Optional[Dict]:
         state = self.__detected_actions[camera_id]
         employee_track_id = state.get("employee_track_id")
@@ -712,9 +660,6 @@ class ActionDetector(threading.Thread):
 
         return False
 
-    # =====================================================
-    # FILTERS / UTILS
-    # =====================================================
     def stop(self):
         self.stop_event.set()
 
@@ -833,10 +778,6 @@ class ActionDetector(threading.Thread):
         return inter / union
 
     def __point_in_polygon(self, point, polygon):
-        """
-        Ray casting algorithm.
-        polygon: [(x, y), ...]
-        """
         x, y = point
         inside = False
         n = len(polygon)
