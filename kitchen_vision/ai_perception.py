@@ -275,7 +275,7 @@ class PerceptionWorker(threading.Thread):
         self.zone_resolver = None
         if zones_path and os.path.exists(zones_path):
             try:
-                from kitchen_vision.zones import ZoneResolver  # модуль ML-04
+                from zones import ZoneResolver  # модуль ML-04
                 self.zone_resolver = ZoneResolver(zones_path)
                 logger.info("ZoneResolver загружен из %s", zones_path)
             except Exception:

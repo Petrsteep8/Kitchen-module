@@ -6,9 +6,8 @@ import ast
 import time
 import requests
 from typing import Any, Dict
-from kitchen_gateway.db_queue.db_queue import DBQueue
-from kitchen_gateway.pydantic_models.pydantic_models import ActionEventLn, HygieneCheckLn, EnvironmentStateLn, SanitaryEventLn, \
-                                             DataQualityEventLn, ProcessEventLn, AuditClipLn
+from db_queue.db_queue import DBQueue
+from pydantic_models.pydantic_models import *
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("dbi_client_integrated")

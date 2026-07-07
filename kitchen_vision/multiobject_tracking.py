@@ -40,7 +40,7 @@ import numpy as np
 logger = logging.getLogger("multiobject_tracking")
 
 try:                                  # OSNet (appearance re-id). Код torchreid — MIT.
-    from torchreid.utils import FeatureExtractor
+    from torchreid.reid.utils import FeatureExtractor
     TORCHREID_AVAILABLE = True
 except Exception:
     try:
