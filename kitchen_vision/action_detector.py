@@ -45,7 +45,10 @@ class ActionDetector(threading.Thread):
         self.__detection_threshold = detection_threshold
 
         self.__tool_classes = {"knife", "tool"}
-        self.__key_object_classes = {"knife", "tool", "food", "cutting_board", "container"}
+        self.__key_object_classes = {
+            "knife", "tool", "food", "cutting_board", "container",
+            "phone", "cigarette_or_smoke_object", "cup", "bottle"
+        }
         self.__container_classes = {"cutting_board", "container"}
         self.__hand_classes = {"hands"}
 
@@ -552,6 +555,36 @@ class ActionDetector(threading.Thread):
                         "key_object_class": obj_class,
                     }
 
+                if obj_class == "phone":
+                    return {
+                        "type": "phone_use",
+                        "employee_track_id": employee_track_id,
+                        "employee_id": employee_id or "undefined",
+                        "employee_confidence": employee_conf,
+                        "key_object_id": obj["track_id"],
+                        "key_object_class": obj_class,
+                    }
+
+                if obj_class == "cigarette_or_smoke_object":
+                    return {
+                        "type": "smoking",
+                        "employee_track_id": employee_track_id,
+                        "employee_id": employee_id or "undefined",
+                        "employee_confidence": employee_conf,
+                        "key_object_id": obj["track_id"],
+                        "key_object_class": obj_class,
+                    }
+
+                if obj_class in {"cup", "bottle"} and hp in {"linear", "vertical"}:
+                    return {
+                        "type": "drinking",
+                        "employee_track_id": employee_track_id,
+                        "employee_id": employee_id or "undefined",
+                        "employee_confidence": employee_conf,
+                        "key_object_id": obj["track_id"],
+                        "key_object_class": obj_class,
+                    }
+
         return None
 
     def __update_action_observation_state(self, camera_id: str, action: Dict, centers: List[Dict], pkt: Dict):
@@ -763,7 +796,7 @@ class ActionDetector(threading.Thread):
         xA = max(boxA[0], boxB[0])
         yA = max(boxA[1], boxB[1])
         xB = min(boxA[2], boxB[2])
-        yB = min(boxA[3], boxB[3])
+        yB = min(boxA[3], boxB[1])
 
         inter_w = max(0.0, xB - xA)
         inter_h = max(0.0, yB - yA)
