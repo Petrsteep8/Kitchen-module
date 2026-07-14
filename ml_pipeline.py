@@ -23,10 +23,12 @@ from kitchen_vision.video_ingestion import CameraWorker
 from kitchen_vision.ai_perception import PerceptionWorker  # noqa: F401  (через sharder)
 from kitchen_vision.perception_sharder import PerceptionSharder
 from kitchen_vision.multiobject_tracking import CrossCameraLinker, build_appearance_encoder
+from facts_consumer import FactsConsumer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ml_pipeline")
 
+consumer = FactsConsumer()
 
 def build_identity_enricher(device="cuda", gallery_path="kitchen_vision/face/faces_db.npz"):
     """Собрать IdentityEnricher (ML-03). None, если идентичность не нужна/insightface отсутствует."""
@@ -80,6 +82,7 @@ class MLPipeline:
     def _default_sink(packet):
         logger.info("[facts] cam=%s n_facts=%d n_ident=%d",
                     packet.get("camera_id"), len(packet.get("facts", [])), len(packet.get("identities", [])))
+        consumer.put_facts(packet)
 
     def _consume(self):
         while not self._stop.is_set():
@@ -117,9 +120,9 @@ class MLPipeline:
 if __name__ == "__main__":
     # пример: 2 камеры, 1 GPU, зоны не калиброваны (zone_id=None — норма до пилота)
     pipe = MLPipeline(
-        cameras=[{"camera_id": "Kitchen_1", "source": 0}, {"camera_id": "Kitchen_2", "source": 1}],
+        cameras=[{"camera_id": "Kitchen_1", "source": 0}],
         devices=["cuda:0"], class_map_path="class_mapping.yaml", zones_path="zones.yaml", fps=8,
-        camera_adjacency={"Kitchen_1": ["Kitchen_2"], "Kitchen_2": ["Kitchen_1"]},
+        camera_adjacency={},
     )
     pipe.start()
     try:
