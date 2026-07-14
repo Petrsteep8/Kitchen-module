@@ -5,6 +5,7 @@ import logging
 import threading
 from collections import defaultdict, deque
 from typing import Dict, List, Tuple, Optional, Any
+from kitchen_vision.pattern_analyzer import MotionPatternAnalyzer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("action_detector")
@@ -17,22 +18,22 @@ class Camera:
 
 class ActionDetector(threading.Thread):
     def __init__(
-        self,
-        cams: List[str],
-        in_queue: queue.Queue,
-        analyser,
-        out_queue: Optional[queue.Queue] = None,
-        work_zone_polygons: Optional[Dict[str, List[Tuple[float, float]]]] = None,
-        detection_threshold: float = 0.5,
-        action_detection_delay: float = 0.5,
-        action_end_delay: float = 0.4,
-        action_check_timeout: float = 30.0,
-        left_confirm_time: float = 1.2,
-        tracking_lost_confirm: float = 0.8,
-        key_object_lost_confirm: float = 0.8,
-        hand_item_distance_px: float = 50.0,
-        hand_overlap_iou_threshold: float = 0.1,
-    ):
+            self,
+            cams: List[str],
+            in_queue: queue.Queue,
+            analyser: MotionPatternAnalyzer,
+            out_queue: Optional[queue.Queue] = None,
+            work_zone_polygons: Optional[Dict[str, List[Tuple[float, float]]]] = None,
+            detection_threshold: float = 0.5,
+            action_detection_delay: float = 0.5,
+            action_end_delay: float = 0.4,
+            action_check_timeout: float = 30.0,
+            left_confirm_time: float = 1.2,
+            tracking_lost_confirm: float = 0.8,
+            key_object_lost_confirm: float = 0.8,
+            hand_item_distance_px: float = 50.0,
+            hand_overlap_iou_threshold: float = 0.1,
+    ) -> None:
         super().__init__(daemon=True)
         self.stop_event = threading.Event()
         self.in_queue = in_queue
@@ -74,11 +75,13 @@ class ActionDetector(threading.Thread):
 
         for cam in cams:
             self.__reset_camera_state(cam)
+        logger.info("ActionDetector initialized")
 
     def run(self):
         while not self.stop_event.is_set():
             try:
                 pkt = self.in_queue.get(timeout=0.25)
+                print("Packet: ", pkt.get("facts", []))
             except queue.Empty:
                 self.__check_timeouts_without_packets()
                 continue
@@ -87,9 +90,12 @@ class ActionDetector(threading.Thread):
                 camera_id = pkt["camera_id"]
                 self.__last_packet_by_cam[camera_id] = pkt
 
+                # Поддержка новых ключей для кадров
                 frame = pkt.get("frame_raw")
                 if frame is None:
                     frame = pkt.get("frame")
+                if frame is None:
+                    frame = pkt.get("frame_bgr")  # [cite: 10]
 
                 if self.action_possible_on_cam(camera_id):
                     cam_data = self.analyze_motion(pkt)
@@ -102,6 +108,40 @@ class ActionDetector(threading.Thread):
 
             except Exception:
                 logger.exception("ActionDetector processing error")
+
+    def __extract_normalized_objects(self, pkt: Dict) -> List[Dict]:
+        """
+        Адаптер для перевода нового формата facts/identities в формат legacy objects
+        для внутренних расчетов[cite: 9, 10].
+        """
+        if "facts" in pkt and pkt["facts"]:
+            identities_map = {}
+            for ident in pkt.get("identities", []):
+                t_id = ident.get("track_lineage_id")
+                if t_id:
+                    identities_map[t_id] = {
+                        "employee_id": ident.get("employee_id"),
+                        "face_score": ident.get("employee_confidence")
+                    }
+
+            normalized_objects = []
+            for fact in pkt["facts"]:
+                t_id = fact.get("track_lineage_id")
+                ident_info = identities_map.get(t_id, {})
+
+                obj = {
+                    "class": fact.get("object_class"),
+                    "id": fact.get("track_id") or t_id,
+                    "bbox": fact.get("bbox"),
+                    "confidence": fact.get("confidence"),
+                    "employee_id": ident_info.get("employee_id"),
+                    "face_score": ident_info.get("face_score")
+                }
+                normalized_objects.append(obj)
+            return normalized_objects
+
+        # Фолбэк для обратной совместимости[cite: 9]
+        return pkt.get("objects", [])
 
     def __emit_events(self, events: Optional[List[Dict[str, Any]]]):
         if not events:
@@ -130,6 +170,8 @@ class ActionDetector(threading.Thread):
                 pkt = self.__last_packet_by_cam.get(camera_id, {
                     "camera_id": camera_id,
                     "objects": [],
+                    "facts": [],
+                    "identities": [],
                     "timestamp": now,
                 })
                 end_event = self.__finish_action(
@@ -141,7 +183,7 @@ class ActionDetector(threading.Thread):
 
     def is_action_possible(self, pkt: Dict) -> bool:
         camera_id = pkt["camera_id"]
-        objects = self.__filter_objects(pkt.get("objects", []))
+        objects = self.__filter_objects(self.__extract_normalized_objects(pkt))
         detected = {obj["class"] for obj in objects}
 
         has_person = "person" in detected
@@ -160,7 +202,9 @@ class ActionDetector(threading.Thread):
     def analyze_motion(self, pkt: Dict):
         camera_id = pkt["camera_id"]
         current_time = time.time()
-        objects = self.__filter_objects(pkt.get("objects", []))
+
+        raw_objects = self.__extract_normalized_objects(pkt)
+        objects = self.__filter_objects(raw_objects)
 
         current_ids = set()
         center_positions = []
@@ -216,6 +260,27 @@ class ActionDetector(threading.Thread):
 
         pkt["motion_patterns"] = patterns or {}
 
+        # Присваиваем паттерны новому формату фактов, если он есть[cite: 10]
+        if "facts" in pkt:
+            for fact in pkt["facts"]:
+                try:
+                    bbox = self.__parse_bbox(fact.get("bbox"))
+                    if not bbox:
+                        fact["motion_pattern"] = None
+                        continue
+
+                    track_id = fact.get("track_id") or fact.get("track_lineage_id")
+                    cls = fact.get("object_class")
+
+                    if track_id is None:
+                        track_id = f"{cls}_fallback_{int(bbox[0])}_{int(bbox[1])}_{int(bbox[2])}_{int(bbox[3])}"
+
+                    uid = f"{cls}_{track_id}"
+                    fact["motion_pattern"] = pkt["motion_patterns"].get(uid)
+                except Exception:
+                    fact["motion_pattern"] = None
+
+        # Оставляем поддержку старого формата[cite: 9]
         for obj in pkt.get("objects", []):
             try:
                 bbox = self.__parse_bbox(obj.get("bbox"))
@@ -272,7 +337,8 @@ class ActionDetector(threading.Thread):
                     state["employee_track_id"] = action["employee_track_id"]
                 if action.get("employee_id"):
                     state["employee_id"] = action["employee_id"]
-                state["employee_confidence"] = float(action.get("employee_confidence", state.get("employee_confidence", 0.0)))
+                state["employee_confidence"] = float(
+                    action.get("employee_confidence", state.get("employee_confidence", 0.0)))
                 if action.get("key_object_id") is not None:
                     state["key_object_id"] = action["key_object_id"]
                 if action.get("key_object_class") is not None:
@@ -311,7 +377,8 @@ class ActionDetector(threading.Thread):
                     state["employee_track_id"] = action["employee_track_id"]
                 if action.get("employee_id"):
                     state["employee_id"] = action["employee_id"]
-                state["employee_confidence"] = float(action.get("employee_confidence", state.get("employee_confidence", 0.0)))
+                state["employee_confidence"] = float(
+                    action.get("employee_confidence", state.get("employee_confidence", 0.0)))
                 if action.get("key_object_id") is not None:
                     state["key_object_id"] = action["key_object_id"]
                 if action.get("key_object_class") is not None:
@@ -331,7 +398,7 @@ class ActionDetector(threading.Thread):
     def __choose_end_reason(self, camera_id: str, pkt: Dict) -> Optional[str]:
         now = time.time()
         state = self.__detected_actions[camera_id]
-        objects = self.__filter_objects(pkt.get("objects", []))
+        objects = self.__filter_objects(self.__extract_normalized_objects(pkt))
 
         if self.__is_tracking_lost(camera_id, objects, now):
             return "tracking_lost"
@@ -432,7 +499,8 @@ class ActionDetector(threading.Thread):
 
     def make_action_start_packet(self, camera_id: str, pkt: Dict) -> Dict[str, Any]:
         d = self.__detected_actions[camera_id]
-        return {
+
+        packet = {
             "event_type": "ACTION_START",
             "action_id": d["action_id"],
             "employee_id": d.get("employee_id"),
@@ -442,12 +510,20 @@ class ActionDetector(threading.Thread):
             "timestamp_start": d["timestamp_start"],
             "hygiene": d.get("hygiene"),
             "motion_patterns": pkt.get("motion_patterns", {}),
-            "objects": pkt.get("objects", []),
+            "objects": pkt.get("objects", []),  # [cite: 9]
         }
+
+        # Прокидываем новые данные в выходные события[cite: 10]
+        if "facts" in pkt:
+            packet["facts"] = pkt["facts"]
+        if "identities" in pkt:
+            packet["identities"] = pkt["identities"]
+
+        return packet
 
     def make_action_end_packet(self, camera_id: str, pkt: Dict, end_reason: str) -> Dict[str, Any]:
         d = self.__detected_actions[camera_id]
-        objects = self.__filter_objects(pkt.get("objects", []))
+        objects = self.__filter_objects(self.__extract_normalized_objects(pkt))
 
         employee_obj = self.__get_action_employee_object(camera_id, objects)
         employee_confidence = 0.0
@@ -470,7 +546,7 @@ class ActionDetector(threading.Thread):
             target_classes={"food"}
         )
 
-        return {
+        packet = {
             "event_type": "ACTION_END",
             "action_id": d["action_id"],
             "employee_id": d.get("employee_id"),
@@ -484,9 +560,17 @@ class ActionDetector(threading.Thread):
             "employee_confidence": max(0.0, min(1.0, employee_confidence)),
             "carrying_tool": carrying_tool,
             "carrying_food": carrying_food,
-            "objects": pkt.get("objects", []),
+            "objects": pkt.get("objects", []),  # [cite: 9]
             "motion_patterns": pkt.get("motion_patterns", {}),
         }
+
+        # Прокидываем новые данные в выходные события[cite: 10]
+        if "facts" in pkt:
+            packet["facts"] = pkt["facts"]
+        if "identities" in pkt:
+            packet["identities"] = pkt["identities"]
+
+        return packet
 
     def __finish_action(self, camera_id: str, end_reason: str, pkt: Dict) -> Dict[str, Any]:
         state = self.__detected_actions[camera_id]
@@ -653,10 +737,10 @@ class ActionDetector(threading.Thread):
         return float(employee_obj.get("confidence", 0.0))
 
     def __is_carrying_class_group(
-        self,
-        employee_obj: Optional[Dict],
-        objects: List[Dict],
-        target_classes: set,
+            self,
+            employee_obj: Optional[Dict],
+            objects: List[Dict],
+            target_classes: set,
     ) -> bool:
         if employee_obj is None:
             return False
@@ -670,8 +754,8 @@ class ActionDetector(threading.Thread):
             if obj.get("class") in self.__hand_classes:
                 bbox = self.__parse_bbox(obj.get("bbox"))
                 if bbox and (
-                    self.__bbox_contains_bbox(employee_bbox, bbox)
-                    or self.__iou(employee_bbox, bbox) > 0.01
+                        self.__bbox_contains_bbox(employee_bbox, bbox)
+                        or self.__iou(employee_bbox, bbox) > 0.01
                 ):
                     hand_boxes.append(bbox)
 
@@ -688,7 +772,8 @@ class ActionDetector(threading.Thread):
             for hand_bbox in hand_boxes:
                 if self.__iou(hand_bbox, target_bbox) > self.__HAND_OVERLAP_IOU:
                     return True
-                if self.__bbox_contains_bbox(hand_bbox, target_bbox) or self.__bbox_contains_bbox(target_bbox, hand_bbox):
+                if self.__bbox_contains_bbox(hand_bbox, target_bbox) or self.__bbox_contains_bbox(target_bbox,
+                                                                                                  hand_bbox):
                     return True
 
         return False
