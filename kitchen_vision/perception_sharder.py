@@ -18,7 +18,7 @@ import logging
 import queue
 import threading
 
-from ai_perception import PerceptionWorker
+from kitchen_vision.ai_perception import PerceptionWorker
 
 logger = logging.getLogger("perception_sharder")
 
