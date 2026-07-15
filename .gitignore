@@ -1,6 +1,6 @@
-queue.db
-queue.db-shm
-queue.db-wal
+*.db
+*.db-shm
+*.db-wal
 *.pem
 openrc.sh
 **/faces_db*.npz
