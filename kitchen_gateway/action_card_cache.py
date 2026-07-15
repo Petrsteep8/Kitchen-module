@@ -12,6 +12,8 @@ class ActionCardCache:
         self._base_url = "http://localhost:8000/api/internal/action-cards/"
         self._restaurant_id = 2
 
+        self.get_action_cards_from_dbi()
+
     def get_action_cards_from_dbi(self):
         try:
             response = self._session.get(self._base_url + f"active?restaurant_id={self._restaurant_id}")

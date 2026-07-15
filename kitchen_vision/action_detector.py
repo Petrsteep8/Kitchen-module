@@ -6,6 +6,8 @@ import threading
 from collections import defaultdict, deque
 from typing import Dict, List, Tuple, Optional, Any
 from kitchen_vision.pattern_analyzer import MotionPatternAnalyzer
+from kitchen_gateway.action_card_cache import ActionCardCache
+from kitchen_gateway.dbi_client import DBIClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("action_detector")
@@ -22,6 +24,8 @@ class ActionDetector(threading.Thread):
             cams: List[str],
             in_queue: queue.Queue,
             analyser: MotionPatternAnalyzer,
+            action_card_cache: ActionCardCache,
+            dbi_client: DBIClient,
             out_queue: Optional[queue.Queue] = None,
             work_zone_polygons: Optional[Dict[str, List[Tuple[float, float]]]] = None,
             detection_threshold: float = 0.5,
@@ -43,6 +47,8 @@ class ActionDetector(threading.Thread):
         self.__action_possible_cameras = set()
 
         self.__pattern_analyser = analyser
+        self.__action_card_cache = action_card_cache
+        self.__dbi_client = dbi_client
         self.__detection_threshold = detection_threshold
 
         self.__tool_classes = {"knife", "tool"}
@@ -67,6 +73,10 @@ class ActionDetector(threading.Thread):
         self.__T_LEFT_CONFIRM = left_confirm_time
         self.__T_TRACKING_LOST_CONFIRM = tracking_lost_confirm
         self.__T_KEY_OBJECT_LOST_CONFIRM = key_object_lost_confirm
+
+        self.__action_card_nf_repeat_count = 4
+        self.__action_card_nf_window_sec = 60
+        self.__action_card_not_found_total = {}
 
         self.__HAND_ITEM_DISTANCE_PX = hand_item_distance_px
         self.__HAND_OVERLAP_IOU = hand_overlap_iou_threshold
@@ -346,6 +356,23 @@ class ActionDetector(threading.Thread):
 
                 if now - state["candidate_since"] >= self.__ACTION_DETECTION_DELAY:
                     action_id = str(uuid.uuid4())
+
+                    if not self.__action_card_cache.get_action_card_from_cache(action["type"], action["key_object_class"]):
+                        self.__reset_camera_state(camera_id)
+                        self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}"] += 1
+                        if self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}"]:
+                            self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}_timestamp_start"] = time.time()
+                        if self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}"] >= 4 \
+                                and time.time() - self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}_timestamp_start"] <= 60:
+                            # print("DATA_QUALITY_EVENT")
+                            data_quality_event = {
+                                "data_quality_event_id": uuid.uuid4(),
+                                "reason": "action_card_not_found",
+                                "observation_state": "OBS_OK"
+                            }
+                            self.__dbi_client.send_with_queue(payload=data_quality_event)
+                            self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}"] = 0
+                        return None
 
                     state.update({
                         "state": "ACTION_ACTIVE",

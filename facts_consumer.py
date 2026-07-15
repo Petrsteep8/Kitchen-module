@@ -3,6 +3,8 @@ import logging
 
 from kitchen_vision.action_detector import ActionDetector
 from kitchen_vision.pattern_analyzer import MotionPatternAnalyzer
+from kitchen_gateway.action_card_cache import ActionCardCache
+from kitchen_gateway.dbi_client import DBIClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("facts_consumer")
@@ -13,11 +15,15 @@ class FactsConsumer:
         self._input_queue = queue.Queue(maxsize=64)
         self._output_queue = queue.Queue(maxsize=64)
         self._analyzer = MotionPatternAnalyzer()
+        self._action_card_cache = ActionCardCache()
+        self._dbi_client = DBIClient()
         self._action_detector = ActionDetector(
             cams=[cam["camera_id"] for cam in self._cameras],
             in_queue=self._input_queue,
             out_queue=self._output_queue,
-            analyser=self._analyzer
+            analyser=self._analyzer,
+            action_card_cache= self._action_card_cache,
+            dbi_client=self._dbi_client
         )
         self._action_detector.daemon = True
         self._action_detector.start()

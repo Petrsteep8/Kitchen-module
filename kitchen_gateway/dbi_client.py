@@ -5,13 +5,12 @@ import logging
 import ast
 import time
 import requests
-from typing import Any, Dict
+from typing import *
 from db_queue.db_queue import DBQueue
 from pydantic_models.pydantic_models import *
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("dbi_client_integrated")
-
 
 class DBIClient:
     def __init__(self, base_url: str = 'https://localhost/api/ingest/', secret_key: bytes = None):
@@ -146,7 +145,7 @@ class DBIClient:
             url = self._route_url(event_type)
 
             while True:
-                if self._send_request(url, payload):
+                if self._send_request(event_type=event_type, endpoint=url, payload=payload):
                     self._db_queue.update_completed(idf=idf)
                     i += 1
                     break
