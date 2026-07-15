@@ -1,33 +1,101 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import *
 import uuid
 
 # SANITARY-СОБЫТИЯ
-UNIFORM_BEHAVIOUR_RULES = [
-    'no_cap', 'no_gloves', 'no_apron',
-    'face_touch', 'phone_usage'
-]
-BEHAVIOUR_SANITARY_RULES = [
-    'food_consumption_in_work_zone', 'food_consumption_after_handling', 'drinking_in_work_zone',
-    'alcohol_consumption_in_work_zone', 'smoking_in_work_zone', 'mouth_contact_with_hands_or_objects_in_work_zone'
-]
-ZONE_EXIT_CONTROL = [
-    'left_zone_with_tool', 'left_zone_with_food'
-]
-INTRUSION_CONTROL = [
-    'intrusion_work_zone'
-]
-
-# PROCESS-СОБЫТИЯ
-PROCESS_EVENTS = [
-    'food_handoff', 'ACTION_INTERRUPTION', 'ZONE_RISK_SCORE'
+SANITARY_EVENT_TYPES = [
+    'incompatible_transition_detected',
+    'left_zone_with_tool',
+    'right_zone_with_tool',
+    'intrusion_work_zone',
+    'no_cap',
+    'no_gloves',
+    'no_apron',
+    'face_touch',
+    'phone_usage',
+    'food_consumption_in_work_zone',
+    'food_consumption_after_handling',
+    'drinking_in_work_zone',
+    'alcohol_consumption_in_work_zone',
+    'smoking_in_work_zone',
+    'mouth_contact_with_hands_or_objects_in_work_zone'
 ]
 
-# DATA_QUALITY-СОБЫТИЯ
-DATA_QUALITY_EVENTS = [
-    'tracking_lost', 'key_object_lost', 'OBS_LOST',
-    'OBS_DEGRADED', 'ambiguous_handoff_target', 'UNRESOLVED_DUE_TO_DATA_QUALITY'
+#ВНУТРЕННИИ УРОВНИ SEVERITY
+SEVERITY_INNER_LEVELS = [
+    'critical',
+    'high',
+    'medium',
+    'low',
+    'info',
+    'warning',
+    'violation'
 ]
 
+#УРОВНИ SEVERITY ДЛЯ DBI
+SEVERITY_LEVELS = [
+    'info',
+    'warning',
+    'violation'
+]
+
+#УРОВНИ ЭСКАЛАЦИИ
+ESCALATION_LEVELS = [
+    'alcohol_escalation',
+    'smoking_escalation'
+]
+
+#НЕСОВМЕСТИМЫЕ ПЕРЕХОДЫ
+IMCOMPATIBILITY_CAUSES = [
+    'missing_hands_washed',
+    'missing_gloves_change',
+    'missing_surface_sanitized',
+    'missing_tool_reset',
+    'missing_container_reset',
+    'forbidden_zone_transition',
+    'contaminated_source_contact',
+    'unknown_source_state',
+    'behavioral_block_active'
+]
+
+#ИТОГОВЫЕ РЕШЕНИЯ
+FINAL_DECISIONS = [
+    'SANITARY_VIOLATION_CONFIRMED',
+    'PROCESS_EVENT_CONFIRMED',
+    'UNRESOLVED_DUE_TO_DATA_QUALITY',
+    'DATA_QUALITY_EVENT_CONFIRMED',
+    'NO_EVENT'
+]
+
+#OBSERVATION_STATES
+OBSERVATION_STATES = [
+    'OBS_OK',
+    'OBS_WEAK',
+    'OBS_DEGRADED',
+    'OBS_LOST'
+]
+
+#PROCESS_EVENT_TYPES
+PROCESS_EVENT_TYPES = [
+    'food_handoff',
+    'ACTION_INTERRUPTION',
+    'ZONE_RISK_SCORE'
+]
+
+#END_REASONS
+END_REASONS = [
+    'tracking_lost',
+    'left_zone',
+    'key_object_lost',
+    'motion_stopped'
+]
+
+#CARRYING_TYPES
+CARRYING_TYPES = [
+    'none',
+    'food',
+    'tool'
+]
 
 # SEVERITY
 SEVERITY_VIOLATION = [
@@ -43,41 +111,31 @@ SEVERITY_INFO = [
 class ActionEventLn(BaseModel):
     event_type: str
     action_id: str
-    employee_id: int = Field(ge=0)
-    camera_id: str
-    zone_id: str
+    employee_id: str
     action_type: str
     object_class: str
-    timestamp_start: str
-    timestamp_end: str
+    zone_id: str
     duration: float = Field(ge=0.0)
     end_reason: str
     employee_confidence: float = Field(ge=0.0, le=1.0)
     carrying_type: str
     carrying_confidence: float = Field(ge=0.0, le=1.0)
-    confidence: float = Field(ge=0.0, le=1.0)
 
-    @field_validator('action_id', mode='before')
+    @field_validator('end_reason', mode='before')
     @classmethod
-    def validate_action_id(cls, v):
-        if isinstance(v, str):
-            try:
-                v = uuid.UUID(v)
-                return str(v)
-            except ValueError:
-                raise ValueError("Cannot convert action_id to UUID4")
+    def validate_sanitary_event_type(cls, v):
+        if v in END_REASONS:
+            return v
         else:
-            raise ValueError("Action_id must be UUID4")
+            raise ValueError("end_reason must be in SANITARY_EVENTS: {}".format(END_REASONS))
 
     @field_validator('carrying_type', mode='before')
     @classmethod
-    def validate_carrying_type(cls, v):
-        if isinstance(v, str):
+    def validate_sanitary_event_type(cls, v):
+        if v in CARRYING_TYPES:
             return v
-        if v != 'food' and v != 'tool' and v != 'none':
-            raise ValueError("Carrying type must be 'food' or 'tool' or 'none'")
         else:
-            raise ValueError("Carrying type must be str")
+            raise ValueError("carrying_type must be in SANITARY_EVENTS: {}".format(CARRYING_TYPES))
 
 
 class HygieneCheckLn(BaseModel):
@@ -95,30 +153,6 @@ class HygieneCheckLn(BaseModel):
     latency_ms: float = Field(ge=0.0)
     raw_payload: dict
 
-    @field_validator('hygiene_check_id', mode='before')
-    @classmethod
-    def validate_hygiene_check_id(cls, v):
-        if isinstance(v, str):
-            try:
-                v = uuid.UUID(v)
-                return str(v)
-            except ValueError:
-                raise ValueError("Cannot convert hygiene_check_id to UUID4")
-        else:
-            raise ValueError("Hygiene_check_id must be UUID4")
-
-    @field_validator('action_id', mode='before')
-    @classmethod
-    def validate_action_id(cls, v):
-        if isinstance(v, str):
-            try:
-                v = uuid.UUID(v)
-                return str(v)
-            except ValueError:
-                raise ValueError("Cannot convert action_id to UUID4")
-        else:
-            raise ValueError("Action_id must be UUID4")
-
 
 class EnvironmentStateLn(BaseModel):
     event_type: str
@@ -135,50 +169,62 @@ class EnvironmentStateLn(BaseModel):
     status: str
     raw_payload: dict
 
-    @field_validator('environment_state_id', mode='before')
-    @classmethod
-    def validate_hygiene_check_id(cls, v):
-        if isinstance(v, str):
-            try:
-                v = uuid.UUID(v)
-                return str(v)
-            except ValueError:
-                raise ValueError("Cannot convert environment_state_id to UUID4")
-        else:
-            raise ValueError("Environment_state_id must be UUID4")
-
 
 class SanitaryEventLn(BaseModel):
     event_type: str
     sanitary_event_id: str
-    sanitary_event: str
+    sanitary_event_type: str
+    source_context: str = Field(default='')
+    target_context: str = Field(default='')
     severity: str
     severity_iternal: str = Field(exclude=True)
     escalation_category: str = Field(default='')
+    incompatibility_cause: str = Field(default='')
+    rule_id: str = Field(default='')
+    zone_id: str
+    employee_id: str = Field(default='')
+    decision_mode: str
 
-    @field_validator('sanitary_event_id', mode='before')
-    @classmethod
-    def validate_sanitary_event_id(cls, v):
-        if isinstance(v, str):
-            try:
-                v = uuid.UUID(v)
-                return str(v)
-            except ValueError:
-                raise ValueError("Cannot convert sanitary_event_id to UUID4")
-        else:
-            raise ValueError("Sanitary_event_id must be UUID4")
-
-    @field_validator('sanitary_event', mode='before')
+    @field_validator('sanitary_event_type', mode='before')
     @classmethod
     def validate_sanitary_event_type(cls, v):
-        if v in UNIFORM_BEHAVIOUR_RULES or v in BEHAVIOUR_SANITARY_RULES or v in ZONE_EXIT_CONTROL\
-                or v in INTRUSION_CONTROL or v in PROCESS_EVENTS or v in DATA_QUALITY_EVENTS:
+        if v in SANITARY_EVENT_TYPES:
             return v
         else:
-            raise ValueError("Sanitary_event must be in SANITARY_EVENTS: {}".format(UNIFORM_BEHAVIOUR_RULES),
-                        "{}".format(BEHAVIOUR_SANITARY_RULES), "{}".format(ZONE_EXIT_CONTROL),
-                        "{}".format(INTRUSION_CONTROL), "{}".format(PROCESS_EVENTS),
-                        "{}".format(DATA_QUALITY_EVENTS))
+            raise ValueError("sanitary_event_type must be in SANITARY_EVENTS: {}".format(SANITARY_EVENT_TYPES))
+
+    @field_validator('severity', mode='before')
+    @classmethod
+    def validate_sanitary_event_type(cls, v):
+        if v in SEVERITY_LEVELS:
+            return v
+        else:
+            raise ValueError("severity must be in SEVERITY_LEVELS: {}".format(SEVERITY_LEVELS))
+
+    @field_validator('escalation_category', mode='before')
+    @classmethod
+    def validate_sanitary_event_type(cls, v):
+        if v in ESCALATION_LEVELS:
+            return v
+        else:
+            raise ValueError("escalation_category must be in ESCALATION_LEVELS: {}".format(ESCALATION_LEVELS))
+
+    @field_validator('incompatibility_cause', mode='before')
+    @classmethod
+    def validate_sanitary_event_type(cls, v):
+        if v in IMCOMPATIBILITY_CAUSES:
+            return v
+        else:
+            raise ValueError("incompatibility_cause must be in IMCOMPATIBILITY_CAUSES: {}".format(IMCOMPATIBILITY_CAUSES))
+
+    @field_validator('decision_mode', mode='before')
+    @classmethod
+    def validate_sanitary_event_type(cls, v):
+        if v in FINAL_DECISIONS:
+            return v
+        else:
+            raise ValueError(
+                "decision_mode must be in FINAL_DECISIONS: {}".format(FINAL_DECISIONS))
 
     @model_validator(mode='after')
     def map_severity_iternal(self):
@@ -197,53 +243,36 @@ class SanitaryEventLn(BaseModel):
 class DataQualityEventLn(BaseModel):
     event_type: str
     data_quality_event_id: str
+    reason: str
+    action_id: str = Field(default='')
+    employee_id: str = Field(default='')
     observation_state: str
-
-    @field_validator('data_quality_event_id', mode='before')
-    @classmethod
-    def validate_data_quality_event_id(cls, v):
-        if isinstance(v, str):
-            try:
-                v = uuid.UUID(v)
-                return str(v)
-            except ValueError:
-                raise ValueError("Cannot convert data_quality_event_id to UUID4")
-        else:
-            raise ValueError("Data_quality_event_id must be UUID4")
+    suppressed_events: List[str] = Field(default=[])
 
     @field_validator('observation_state', mode='before')
     @classmethod
     def validate_observation_state_type(cls, v):
-        if v in DATA_QUALITY_EVENTS:
+        if v in OBSERVATION_STATES:
             return v
         else:
-            raise ValueError("Observation_state  must be in DATA_QUALITY_EVENTS: {}".format(DATA_QUALITY_EVENTS))
+            raise ValueError("observation_state  must be in OBSERVATION_STATES: {}".format(OBSERVATION_STATES))
 
 
 class ProcessEventLn(BaseModel):
     event_type: str
     process_event_id: str
-    process_event: str
-
-    @field_validator('process_event_id', mode='before')
-    @classmethod
-    def validate_process_event_id(cls, v):
-        if isinstance(v, str):
-            try:
-                v = uuid.UUID(v)
-                return str(v)
-            except ValueError:
-                raise ValueError("Cannot convert process_event_id to UUID4")
-        else:
-            raise ValueError("Process_event_id must be UUID4")
+    process_event_type: str
+    employee_id: str = Field(default='')
+    zone_id: str = Field(default='')
+    details: object = Field(default={})
 
     @field_validator('process_event', mode='before')
     @classmethod
     def validate_process_event_type(cls, v):
-        if v in PROCESS_EVENTS:
+        if v in PROCESS_EVENT_TYPES:
             return v
         else:
-            raise ValueError("Process_event must be in PROCESS_EVENTS: {}".format(PROCESS_EVENTS))
+            raise ValueError("process_event must be in PROCESS_EVENT_TYPES: {}".format(PROCESS_EVENT_TYPES))
 
 
 class AuditClipLn(BaseModel):
@@ -252,18 +281,6 @@ class AuditClipLn(BaseModel):
     sanitary_event_id: str = Field(default='')
     process_event_id: str = Field(default='')
     data_quality_event_id: str = Field(default='')
-
-    @field_validator('audit_clip_id', mode='before')
-    @classmethod
-    def validate_audit_clip_id(cls, v):
-        if isinstance(v, str):
-            try:
-                v = uuid.UUID(v)
-                return str(v)
-            except ValueError:
-                raise ValueError("Cannot convert audit_clip_id to UUID4")
-        else:
-            raise ValueError("Audit_clip_id must be UUID4")
 
     @field_validator('sanitary_event_id', mode='before')
     @classmethod
