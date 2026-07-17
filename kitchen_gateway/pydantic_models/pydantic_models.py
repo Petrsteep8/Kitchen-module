@@ -123,7 +123,7 @@ class ActionEventLn(BaseModel):
 
     @field_validator('end_reason', mode='before')
     @classmethod
-    def validate_sanitary_event_type(cls, v):
+    def validate_sanitary_end_reason(cls, v):
         if v in END_REASONS:
             return v
         else:
@@ -131,7 +131,7 @@ class ActionEventLn(BaseModel):
 
     @field_validator('carrying_type', mode='before')
     @classmethod
-    def validate_sanitary_event_type(cls, v):
+    def validate_sanitary_carrying_type(cls, v):
         if v in CARRYING_TYPES:
             return v
         else:
@@ -195,7 +195,7 @@ class SanitaryEventLn(BaseModel):
 
     @field_validator('severity', mode='before')
     @classmethod
-    def validate_sanitary_event_type(cls, v):
+    def validate_sanitary_severity(cls, v):
         if v in SEVERITY_LEVELS:
             return v
         else:
@@ -203,7 +203,7 @@ class SanitaryEventLn(BaseModel):
 
     @field_validator('escalation_category', mode='before')
     @classmethod
-    def validate_sanitary_event_type(cls, v):
+    def validate_sanitary_escalation_category(cls, v):
         if v in ESCALATION_LEVELS:
             return v
         else:
@@ -211,7 +211,7 @@ class SanitaryEventLn(BaseModel):
 
     @field_validator('incompatibility_cause', mode='before')
     @classmethod
-    def validate_sanitary_event_type(cls, v):
+    def validate_sanitary_incompatibility_cause(cls, v):
         if v in IMCOMPATIBILITY_CAUSES:
             return v
         else:
@@ -219,7 +219,7 @@ class SanitaryEventLn(BaseModel):
 
     @field_validator('decision_mode', mode='before')
     @classmethod
-    def validate_sanitary_event_type(cls, v):
+    def validate_sanitary_decision_mode(cls, v):
         if v in FINAL_DECISIONS:
             return v
         else:
@@ -266,7 +266,7 @@ class ProcessEventLn(BaseModel):
     zone_id: str = Field(default='')
     details: object = Field(default={})
 
-    @field_validator('process_event', mode='before')
+    @field_validator('process_event_type', mode='before')
     @classmethod
     def validate_process_event_type(cls, v):
         if v in PROCESS_EVENT_TYPES:
@@ -281,20 +281,6 @@ class AuditClipLn(BaseModel):
     sanitary_event_id: str = Field(default='')
     process_event_id: str = Field(default='')
     data_quality_event_id: str = Field(default='')
-
-    @field_validator('sanitary_event_id', mode='before')
-    @classmethod
-    def validate_sanitary_event_id(cls, v):
-        if isinstance(v, str) and v == '':
-            return v
-        if isinstance(v, str) and v != '':
-            try:
-                v = uuid.UUID(v)
-                return str(v)
-            except ValueError:
-                raise ValueError("Cannot convert sanitary_event_id to UUID4")
-        else:
-            raise ValueError("Sanitary_event_id must be UUID4")
 
     @field_validator('process_event_id', mode='before')
     @classmethod
