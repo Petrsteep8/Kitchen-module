@@ -80,8 +80,8 @@ class MLPipeline:
 
     @staticmethod
     def _default_sink(packet):
-        logger.info("[facts] cam=%s n_facts=%d n_ident=%d",
-                    packet.get("camera_id"), len(packet.get("facts", [])), len(packet.get("identities", [])))
+        # logger.info("[facts] cam=%s n_facts=%d n_ident=%d",
+        #             packet.get("camera_id"), len(packet.get("facts", [])), len(packet.get("identities", [])))
         consumer.put_facts(packet)
 
     def _consume(self):
@@ -101,8 +101,11 @@ class MLPipeline:
             w = CameraWorker(camera_id=cam["camera_id"], source=cam["source"],
                              out_queue=self.frame_q, target_fps=self.fps,
                              target_resolution=cam.get("resolution", (1280, 720)))
-            w.daemon = True; w.start(); self._workers.append(w)
+            w.daemon = True
+            w.start()
+            self._workers.append(w)
             logger.info("Камера %s запущена (fps=%d)", cam["camera_id"], self.fps)
+
         self.sharder.start(source_queue=self.frame_q)
         threading.Thread(target=self._consume, daemon=True).start()
         logger.info("ML-конвейер запущен.")

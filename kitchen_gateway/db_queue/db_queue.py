@@ -31,7 +31,7 @@ def retry_on_lock(func: Callable) -> Callable:
 
 
 class DBQueue:
-    def __init__(self, db_path: str = './db_queue/db_queue.db'):
+    def __init__(self, db_path: str = './db_queue.db'):
         self.db_path = db_path
         self._local = threading.local()
         self._lock = threading.RLock()

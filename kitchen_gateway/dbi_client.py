@@ -6,8 +6,8 @@ import ast
 import time
 import requests
 from typing import *
-from db_queue.db_queue import DBQueue
-from pydantic_models.pydantic_models import *
+from kitchen_gateway.db_queue.db_queue import DBQueue
+from kitchen_gateway.pydantic_models.pydantic_models import *
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("dbi_client_integrated")
@@ -17,7 +17,7 @@ class DBIClient:
         self._base_url = base_url
         self._secret_key = secret_key
         self._session = requests.Session()
-        self._db_queue = DBQueue()
+        self._db_queue = DBQueue(db_path='./kitchen_gateway/db_queue/db_queue.db')
 
     def _generate_signature(self, payload: Dict[str, Any]) -> str:
         message = json.dumps(payload, sort_keys=True)

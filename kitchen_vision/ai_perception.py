@@ -261,7 +261,7 @@ class PerceptionWorker(threading.Thread):
         self.in_queue = in_queue
         self.out_queue = out_queue
         self.model_dir = model_dir
-        self.device = DEVICE or device  # GPU-пин для шардинга (ML-01): "cuda:0", "cuda:1", ...
+        self.device = device or DEVICE  # GPU-пин для шардинга (ML-01): "cuda:0", "cuda:1", ...
         self.stop_event = threading.Event()
 
         cfg = dict(DEFAULTS)

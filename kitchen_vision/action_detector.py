@@ -1,3 +1,4 @@
+import json
 import queue
 import time
 import uuid
@@ -8,6 +9,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from kitchen_vision.pattern_analyzer import MotionPatternAnalyzer
 from kitchen_gateway.action_card_cache import ActionCardCache
 from kitchen_gateway.dbi_client import DBIClient
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("action_detector")
@@ -25,7 +27,6 @@ class ActionDetector(threading.Thread):
             in_queue: queue.Queue,
             analyser: MotionPatternAnalyzer,
             action_card_cache: ActionCardCache,
-            dbi_client: DBIClient,
             out_queue: Optional[queue.Queue] = None,
             work_zone_polygons: Optional[Dict[str, List[Tuple[float, float]]]] = None,
             detection_threshold: float = 0.5,
@@ -48,7 +49,6 @@ class ActionDetector(threading.Thread):
 
         self.__pattern_analyser = analyser
         self.__action_card_cache = action_card_cache
-        self.__dbi_client = dbi_client
         self.__detection_threshold = detection_threshold
 
         self.__tool_classes = {"knife", "tool"}
@@ -91,7 +91,7 @@ class ActionDetector(threading.Thread):
         while not self.stop_event.is_set():
             try:
                 pkt = self.in_queue.get(timeout=0.25)
-                print("Packet: ", pkt.get("facts", []))
+                print("Packet: in action detector")
             except queue.Empty:
                 self.__check_timeouts_without_packets()
                 continue
@@ -119,7 +119,10 @@ class ActionDetector(threading.Thread):
             except Exception:
                 logger.exception("ActionDetector processing error")
 
-    def __extract_normalized_objects(self, pkt: Dict) -> List[Dict]:
+    def stop(self):
+        self.stop_event.set()
+
+    def extract_normalized_objects(self, pkt: Dict) -> List[Dict]:
         """
         Адаптер для перевода нового формата facts/identities в формат legacy objects
         для внутренних расчетов[cite: 9, 10].
@@ -193,7 +196,7 @@ class ActionDetector(threading.Thread):
 
     def is_action_possible(self, pkt: Dict) -> bool:
         camera_id = pkt["camera_id"]
-        objects = self.__filter_objects(self.__extract_normalized_objects(pkt))
+        objects = self.__filter_objects(self.extract_normalized_objects(pkt))
         detected = {obj["class"] for obj in objects}
 
         has_person = "person" in detected
@@ -213,7 +216,7 @@ class ActionDetector(threading.Thread):
         camera_id = pkt["camera_id"]
         current_time = time.time()
 
-        raw_objects = self.__extract_normalized_objects(pkt)
+        raw_objects = self.extract_normalized_objects(pkt)
         objects = self.__filter_objects(raw_objects)
 
         current_ids = set()
@@ -364,13 +367,13 @@ class ActionDetector(threading.Thread):
                             self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}_timestamp_start"] = time.time()
                         if self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}"] >= 4 \
                                 and time.time() - self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}_timestamp_start"] <= 60:
-                            # print("DATA_QUALITY_EVENT")
                             data_quality_event = {
+                                "event_type": "DATA_QUALITY_EVENT",
                                 "data_quality_event_id": uuid.uuid4(),
                                 "reason": "action_card_not_found",
                                 "observation_state": "OBS_OK"
                             }
-                            self.__dbi_client.send_with_queue(payload=data_quality_event)
+                            print("DATA_QUALITY_EVENT: ", data_quality_event)
                             self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}"] = 0
                         return None
 
@@ -425,7 +428,7 @@ class ActionDetector(threading.Thread):
     def __choose_end_reason(self, camera_id: str, pkt: Dict) -> Optional[str]:
         now = time.time()
         state = self.__detected_actions[camera_id]
-        objects = self.__filter_objects(self.__extract_normalized_objects(pkt))
+        objects = self.__filter_objects(self.extract_normalized_objects(pkt))
 
         if self.__is_tracking_lost(camera_id, objects, now):
             return "tracking_lost"
@@ -550,7 +553,7 @@ class ActionDetector(threading.Thread):
 
     def make_action_end_packet(self, camera_id: str, pkt: Dict, end_reason: str) -> Dict[str, Any]:
         d = self.__detected_actions[camera_id]
-        objects = self.__filter_objects(self.__extract_normalized_objects(pkt))
+        objects = self.__filter_objects(self.extract_normalized_objects(pkt))
 
         employee_obj = self.__get_action_employee_object(camera_id, objects)
         employee_confidence = 0.0
@@ -805,9 +808,6 @@ class ActionDetector(threading.Thread):
 
         return False
 
-    def stop(self):
-        self.stop_event.set()
-
     def action_possible_on_cam(self, cam: str) -> bool:
         return cam in self.__action_possible_cameras
 
@@ -908,7 +908,7 @@ class ActionDetector(threading.Thread):
         xA = max(boxA[0], boxB[0])
         yA = max(boxA[1], boxB[1])
         xB = min(boxA[2], boxB[2])
-        yB = min(boxA[3], boxB[1])
+        yB = min(boxA[3], boxB[3])
 
         inter_w = max(0.0, xB - xA)
         inter_h = max(0.0, yB - yA)
@@ -943,3 +943,72 @@ class ActionDetector(threading.Thread):
                             inside = not inside
             px1, py1 = px2, py2
         return inside
+
+
+if __name__ == "__main__":
+    action_detector = ActionDetector(cams=[], in_queue=None, out_queue=None, dbi_client=None, analyser=None, action_card_cache=None)
+    payload = {
+        "camera_id": "Kitchen_1",
+        "timestamp": 1696154312000,
+        "frame_bgr": "<numpy.ndarray object at 0x...>",
+
+        "facts": [
+            {
+                "fact_id": "a1b2c3d4-5678-90ab-cdef-111111111111",
+                "timestamp": 1696154312000,
+                "camera_id": "Kitchen_1",
+                "track_id": "42",
+                "track_lineage_id": "global-uuid-1234-5678",
+                "object_class": "person",
+                "bbox": [150.5, 80.0, 400.2, 700.8],
+                "confidence": 0.8912,
+                "zone_id": "zone_77",
+                "model_versions": {
+                    "detector": "yolov8s+glove@1696000000",
+                    "tracker": "bytetrack-supervision",
+                    "code_version": "ai_perception-2.1.0"
+                }
+            },
+            {
+                "fact_id": "f8e7d6c5-4321-abcd-ef01-222222222222",
+                "timestamp": 1696154312000,
+                "camera_id": "Kitchen_1",
+                "track_id": "43",
+                "track_lineage_id": "global-uuid-9999-8888",
+                "object_class": "hands",
+                "bbox": [200.0, 300.0, 250.0, 350.0],
+                "confidence": 0.9200,
+                "zone_id": "zone_77",
+                "model_versions": {...}
+            },
+            {
+                "fact_id": "c3b2a1d0-1234-5678-90ab-333333333333",
+                "timestamp": 1696154312000,
+                "camera_id": "Kitchen_1",
+                "track_id": "43",
+                "track_lineage_id": "global-uuid-9999-8888",
+                "object_class": "glove",
+                "bbox": [200.0, 300.0, 250.0, 350.0],
+                "confidence": 0.9200,
+                "zone_id": "zone_77",
+                "model_versions": {...}
+            }
+        ],
+
+        "identities": [
+            {
+                "track_lineage_id": "global-uuid-1234-5678",
+                "employee_id": "emp_007_ivan",
+                "employee_confidence": 0.95,
+                "executor_attribution": "confirmed",
+                "cross_camera_assigned": False
+            }
+        ],
+
+        "objects": [
+            "... (deprecated список для обратной совместимости, содержит старый формат bbox/class)"
+        ]
+    }
+
+    data = action_detector.extract_normalized_objects(pkt=payload)
+    print(json.dumps(data, indent=4))

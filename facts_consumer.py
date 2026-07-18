@@ -5,6 +5,7 @@ from kitchen_vision.action_detector import ActionDetector
 from kitchen_vision.pattern_analyzer import MotionPatternAnalyzer
 from kitchen_gateway.action_card_cache import ActionCardCache
 from kitchen_gateway.dbi_client import DBIClient
+from kitchen_vision.sanitary_checker.observation_logic.observation_logic import ObservationLogic
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("facts_consumer")
@@ -12,18 +13,25 @@ logger = logging.getLogger("facts_consumer")
 class FactsConsumer:
     def __init__(self, cams = None):
         self._cameras = cams or [{"camera_id": "Kitchen_1", "source": 0}]
-        self._input_queue = queue.Queue(maxsize=64)
-        self._output_queue = queue.Queue(maxsize=64)
+        self._input_action_detector_queue = queue.Queue(maxsize=64)
+        self._output_action_detector_queue = queue.Queue(maxsize=64)
+        self._input_obs_logic_queue = queue.Queue(maxsize=64)
+        self._input_event_queue = queue.Queue(maxsize=64)
+
         self._analyzer = MotionPatternAnalyzer()
         self._action_card_cache = ActionCardCache()
         self._dbi_client = DBIClient()
+
+        self._obs_logic = ObservationLogic(input_queue=self._input_obs_logic_queue)
+        self._obs_logic.daemon = True
+        self._obs_logic.start()
+
         self._action_detector = ActionDetector(
             cams=[cam["camera_id"] for cam in self._cameras],
-            in_queue=self._input_queue,
-            out_queue=self._output_queue,
+            in_queue=self._input_action_detector_queue,
+            out_queue=self._output_action_detector_queue,
             analyser=self._analyzer,
             action_card_cache= self._action_card_cache,
-            dbi_client=self._dbi_client
         )
         self._action_detector.daemon = True
         self._action_detector.start()
@@ -32,7 +40,8 @@ class FactsConsumer:
     def put_facts(self, facts):
         if not facts is None:
             try:
-                self._input_queue.put(facts)
+                self._input_action_detector_queue.put(facts)
+                self._input_obs_logic_queue.put(facts)
             except queue.Full:
                 logger.error("Facts queue is full")
 

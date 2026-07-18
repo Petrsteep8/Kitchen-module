@@ -7,3 +7,5 @@ openrc.sh
 
 __pycache__/
 *.pyc
+
+test.py
