@@ -96,13 +96,17 @@ class EmployeeContextFSM:
             return self._sanitary_states.UNKNOWN
         return data.get("sanitary_state", self._sanitary_states.UNKNOWN)
 
-    def _set_context(self, track_id: str, new_context: EmployeeContexts) -> None:
+    def set_context(self, track_id: str, new_context: EmployeeContexts) -> None:
         if track_id in self._data:
             self._data[track_id]["context"] = new_context
 
-    def _set_sanitary_state(self, track_id: str, new_state: EmployeeSanitaryStates) -> None:
+    def set_sanitary_state(self, track_id: str, new_state: EmployeeSanitaryStates) -> None:
         if track_id in self._data:
             self._data[track_id]["sanitary_state"] = new_state
+
+    def set_is_reset_pending(self, track_id: str, reset_pending: bool) -> None:
+        if track_id in self._data:
+            self._data[track_id]["reset_pending"] = reset_pending
 
     def process_event(
             self,
@@ -114,38 +118,38 @@ class EmployeeContextFSM:
 
         if (event == EmployeeEvents.CONTEXT_OBSERVED_RAW_ANIMAL and
                 current_context == self._context.UNKNOWN):
-            self._set_context(track_id, self._context.RAW_ANIMAL)
+            self.set_context(track_id, self._context.RAW_ANIMAL)
             return
 
         if (event == EmployeeEvents.CONTEXT_OBSERVED_CLEAN_PREP and
                 current_context == self._context.UNKNOWN):
-            self._set_context(track_id, self._context.CLEAN_PREP)
+            self.set_context(track_id, self._context.CLEAN_PREP)
             return
 
         if (event == EmployeeEvents.CONTEXT_OBSERVED_READY_TO_EAT and
                 current_context == self._context.UNKNOWN):
-            self._set_context(track_id, self._context.READY_TO_EAT)
+            self.set_context(track_id, self._context.READY_TO_EAT)
             return
 
         if (event == EmployeeEvents.ZONE_ENTER and
                 event_type == self._context.DIRTY_ZONE):
-            self._set_context(track_id, self._context.DIRTY_ZONE)
-            self._set_sanitary_state(track_id, self._sanitary_states.CONTAMINATED)
+            self.set_context(track_id, self._context.DIRTY_ZONE)
+            self.set_sanitary_state(track_id, self._sanitary_states.CONTAMINATED)
             return
 
         if (event == EmployeeEvents.ZONE_ENTER and
                 event_type == self._context.CLEAN_ZONE):
-            self._set_context(track_id, self._context.CLEAN_ZONE)
+            self.set_context(track_id, self._context.CLEAN_ZONE)
             return
 
         if event == EmployeeEvents.ZONE_EXIT:
-            self._set_context(track_id, self._context.NEUTRAL)
+            self.set_context(track_id, self._context.NEUTRAL)
             return
 
         if (event == EmployeeEvents.CONTAMINATION_EVENT and
                 event_type == self._context.NONFOOD_CONTACT):
-            self._set_context(track_id, self._context.NONFOOD_CONTACT)
-            self._set_sanitary_state(track_id, self._sanitary_states.CONTAMINATED)
+            self.set_context(track_id, self._context.NONFOOD_CONTACT)
+            self.set_sanitary_state(track_id, self._sanitary_states.CONTAMINATED)
             return
 
         #TODO тут хуета переделать надо
@@ -158,23 +162,23 @@ class EmployeeContextFSM:
             }
             if event_type in reset_types:
                 if event_type == self._context.SHIFT_STARTED:
-                    self._set_sanitary_state(track_id, self._sanitary_states.CLEAN_CONFIRMED)
-                    self._set_context(track_id, self._context.SANITIZED)
+                    self.set_sanitary_state(track_id, self._sanitary_states.CLEAN_CONFIRMED)
+                    self.set_context(track_id, self._context.SANITIZED)
                 else:
-                    self._set_context(track_id, self._context.RESET_PENDING)
+                    self.set_context(track_id, self._context.RESET_PENDING)
                     if track_id in self._data:
                         self._data[track_id]["reset_pending"] = True
                 return
 
         if event == EmployeeEvents.TTL_EXPIRED:
-            self._set_context(track_id, self._context.UNKNOWN)
-            self._set_sanitary_state(track_id, self._sanitary_states.UNKNOWN)
+            self.set_context(track_id, self._context.UNKNOWN)
+            self.set_sanitary_state(track_id, self._sanitary_states.UNKNOWN)
             return
 
         if (event == EmployeeEvents.OBS_EVENT and
                 event_type == self._context.OBS_LOST):
-            self._set_context(track_id, self._context.UNKNOWN)
-            self._set_sanitary_state(track_id, self._sanitary_states.UNKNOWN)
+            self.set_context(track_id, self._context.UNKNOWN)
+            self.set_sanitary_state(track_id, self._sanitary_states.UNKNOWN)
             return
 
     def add_data_by_track_id(self, track_id: str, data: Dict[str, Any]) -> None:
