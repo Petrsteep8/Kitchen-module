@@ -6,6 +6,16 @@ import time
 import uuid
 import enum
 
+try:
+    from kitchen_vision.sanitary_checker.fsm.employee_context_fsm import EmployeeContextFSM
+    from kitchen_vision.sanitary_checker.fsm.hands_context_fsm import HandsContextFSM
+    from kitchen_vision.sanitary_checker.fsm.tool_context_fsm import ToolContextFSM
+    from kitchen_vision.sanitary_checker.fsm.container_context_fsm import ContainerContextFSM
+    from kitchen_vision.sanitary_checker.fsm.surface_context_fsm import SurfaceContextFSM
+    from kitchen_vision.sanitary_checker.fsm.zone_context_fsm import ZoneFSM
+except ImportError:
+    pass
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("event_pipeline")
 
@@ -69,10 +79,19 @@ class EventPipeline(threading.Thread):
         self._reset_events = ResetTypes
         self._contamination_events = ContaminationTypes
 
+        self._employee_context_fsm = EmployeeContextFSM() or None
+        self._hands_context_fsm = HandsContextFSM() or None
+        self._tool_context_fsm = ToolContextFSM() or None
+        self._container_context_fsm = ContainerContextFSM() or None
+        self._surface_context_fsm = SurfaceContextFSM() or None
+        self._zone_context_fsm = ZoneFSM() or None
+
     def run(self):
         while not self.stop_event.is_set():
             try:
                 pkt = self._input_queue.get()
+                if pkt is not None:
+                    print(pkt)
             except queue.Empty:
                 continue
 
@@ -156,42 +175,14 @@ class EventPipeline(threading.Thread):
         if event_type == self._event_types.RESET_EVENT:
             try:
                 normalised_event["entity_id"] = event["zone_id"]
-                reset_type = event["reset_type"]
-                if reset_type == self._reset_events.hands_washed:
-                    normalised_event["entity_type"] = "hands"
-                elif reset_type == self._reset_events.gloves_changed:
-                    normalised_event["entity_type"] = "hands"
-                elif reset_type == self._reset_events.gloves_removed:
-                    normalised_event["entity_type"] = "hands"
-                elif reset_type == self._reset_events.gloves_put_on:
-                    normalised_event["entity_type"] = "hands"
-                elif reset_type == self._reset_events.tool_washed:
-                    normalised_event["entity_type"] = "tool"
-                elif reset_type == self._reset_events.clean_tool_taken:
-                    normalised_event["entity_type"] = "tool"
-                elif reset_type == self._reset_events.tool_replaced:
-                    normalised_event["entity_type"] = "tool"
-                elif reset_type == self._reset_events.container_replaced_clean:
-                    normalised_event["entity_type"] = "container"
-                elif reset_type == self._reset_events.disposable_container_used:
-                    normalised_event["entity_type"] = "container"
-                elif reset_type == self._reset_events.surface_sanitized:
-                    normalised_event["entity_type"] = "surface"
-                elif reset_type == self._reset_events.entered_reset_zone:
-                    normalised_event["entity_type"] = "employee"
-                elif reset_type == self._reset_events.passed_clean_gate:
-                    normalised_event["entity_type"] = "employee"
-                elif reset_type == self._reset_events.shift_started:
-                    normalised_event["entity_type"] = "employee"
-                elif reset_type == self._reset_events.returned_to_kitchen:
-                    normalised_event["entity_type"] = "employee"
+                normalised_event["entity_type"] = event["target_entities"]
             except KeyError:
                 logger.warning("KeyError in normalise_event")
                 return None
 
         if event_type == self._event_types.CONTAMINATION_EVENT:
             try:
-                normalised_event["entity_id"] = event["track_id"]
+                normalised_event["entity_id"] = event["track_id"] #TODO add track_id to event payload
                 contamination_type = event["contamination_type"]
                 if contamination_type == self._contamination_events.nonfood_contact and event["target_entity"] == "employee":
                     normalised_event["entity_type"] = "employee"
