@@ -4,32 +4,32 @@ from typing import Optional, Dict, Any
 
 
 class ContainerEvents(enum.Enum):
-    INTERACTION = "INTERACTION"
-    CONTAMINATION_EVENT = "CONTAMINATION_EVENT"
-    SANITIZATION_EVENT = "SANITIZATION_EVENT"
-    OBS_EVENT = "OBS_EVENT"
-    TTL_EXPIRED = "TTL_EXPIRED"
+    interaction = "interaction"
+    contamination_event = "contamination_event"
+    sanitization_event = "sanitization_event"
+    obs_event = "obs_event"
+    ttl_expired = "ttl_expired"
 
 
 class ContainerContexts(enum.Enum):
-    UNKNOWN = "UNKNOWN"
-    NEUTRAL = "NEUTRAL"
-    RAW_ANIMAL = "RAW_ANIMAL"
-    RTE_FOOD = "RTE_FOOD"
-    CONTAMINATED = "CONTAMINATED"
-    SANITIZED = "SANITIZED"
-    IN_USE = "IN_USE"
-    OBS_LOST = "OBS_LOST"
-    RAW_FOOD = "RAW_FOOD"
-    HANDS = "HANDS"
-    FOOD = "FOOD"
+    unknown = "unknown"
+    neutral = "neutral"
+    raw_animal = "raw_animal"
+    rte_food = "rte_food"
+    contaminated = "contaminated"
+    sanitized = "sanitized"
+    in_use = "in_use"
+    obs_lost = "obs_lost"
+    raw_food = "raw_food"
+    hands = "hands"
+    food = "food"
 
 
 class ContainerSanitaryStates(enum.Enum):
-    CLEAN_CONFIRMED = "CLEAN_CONFIRMED"
-    CLEAN_DEGRADING = "CLEAN_DEGRADING"
-    UNKNOWN = "UNKNOWN"
-    CONTAMINATED = "CONTAMINATED"
+    clean_confirmed = "clean_confirmed"
+    clean_degrading = "clean_degrading"
+    unknown = "unknown"
+    contaminated = "contaminated"
 
 
 class ContainerContextFSM:
@@ -42,14 +42,14 @@ class ContainerContextFSM:
     def _get_current_context(self, track_id: str) -> ContainerContexts:
         data = self._data.get(track_id)
         if not data:
-            return self._context.UNKNOWN
-        return data.get("context", self._context.UNKNOWN)
+            return self._context.unknown
+        return data.get("context", self._context.unknown)
 
     def _get_current_state(self, track_id: str) -> ContainerSanitaryStates:
         data = self._data.get(track_id)
         if not data:
-            return self._sanitary_states.UNKNOWN
-        return data.get("sanitary_state", self._sanitary_states.UNKNOWN)
+            return self._sanitary_states.unknown
+        return data.get("sanitary_state", self._sanitary_states.unknown)
 
     def set_context(self, track_id: str, new_context: ContainerContexts) -> None:
         if track_id in self._data:
@@ -67,46 +67,46 @@ class ContainerContextFSM:
     ) -> None:
         current_context = self._get_current_context(track_id)
 
-        if (event == ContainerEvents.INTERACTION and
-                event_type == self._context.FOOD and
-                current_context in (self._context.UNKNOWN, self._context.NEUTRAL)):
-            self.set_context(track_id, self._context.IN_USE)
+        if (event == ContainerEvents.interaction and
+                event_type == self._context.food and
+                current_context in (self._context.unknown, self._context.neutral)):
+            self.set_context(track_id, self._context.in_use)
             return
 
-        if (event == ContainerEvents.CONTAMINATION_EVENT and
-                event_type == self._context.RAW_FOOD and
-                current_context in (self._context.UNKNOWN, self._context.NEUTRAL, self._context.IN_USE)):
-            self.set_context(track_id, self._context.RAW_ANIMAL)
-            self.set_sanitary_state(track_id, self._sanitary_states.CONTAMINATED)
+        if (event == ContainerEvents.contamination_event and
+                event_type == self._context.raw_food and
+                current_context in (self._context.unknown, self._context.neutral, self._context.in_use)):
+            self.set_context(track_id, self._context.raw_animal)
+            self.set_sanitary_state(track_id, self._sanitary_states.contaminated)
             return
 
-        if (event == ContainerEvents.SANITIZATION_EVENT and
-                current_context in (self._context.RAW_ANIMAL, self._context.CONTAMINATED, self._context.IN_USE)):
-            self.set_context(track_id, self._context.SANITIZED)
-            self.set_sanitary_state(track_id, self._sanitary_states.CLEAN_CONFIRMED)
+        if (event == ContainerEvents.sanitization_event and
+                current_context in (self._context.raw_animal, self._context.contaminated, self._context.in_use)):
+            self.set_context(track_id, self._context.sanitized)
+            self.set_sanitary_state(track_id, self._sanitary_states.clean_confirmed)
             return
 
-        if (event == ContainerEvents.INTERACTION and
-                event_type == self._context.HANDS and
-                current_context == self._context.SANITIZED):
-            self.set_context(track_id, self._context.IN_USE)
-            self.set_sanitary_state(track_id, self._sanitary_states.CLEAN_DEGRADING)
+        if (event == ContainerEvents.interaction and
+                event_type == self._context.hands and
+                current_context == self._context.sanitized):
+            self.set_context(track_id, self._context.in_use)
+            self.set_sanitary_state(track_id, self._sanitary_states.clean_degrading)
             return
 
-        if event == ContainerEvents.TTL_EXPIRED:
-            self.set_context(track_id, self._context.UNKNOWN)
+        if event == ContainerEvents.ttl_expired:
+            self.set_context(track_id, self._context.unknown)
             return
 
-        if (event == ContainerEvents.OBS_EVENT and
-                event_type == self._context.OBS_LOST):
-            self.set_context(track_id, self._context.UNKNOWN)
+        if (event == ContainerEvents.obs_event and
+                event_type == self._context.obs_lost):
+            self.set_context(track_id, self._context.unknown)
             return
 
     def add_data_by_track_id(self, track_id: str, data: Dict[str, Any]) -> None:
         if "context" not in data:
-            data["context"] = self._context.UNKNOWN
+            data["context"] = self._context.unknown
         if "sanitary_state" not in data:
-            data["sanitary_state"] = self._sanitary_states.UNKNOWN
+            data["sanitary_state"] = self._sanitary_states.unknown
         if "ttl_remaining_time" not in data:
             data["ttl_remaining_time"] = 0
         if "last_event_timestamp" not in data:
@@ -140,8 +140,8 @@ if __name__ == "__main__":
     payload = {
         "container_id": "tray_1",
         "entity_type": "container",
-        "sanitary_state": ContainerSanitaryStates.UNKNOWN,
-        "context": ContainerContexts.NEUTRAL,
+        "sanitary_state": ContainerSanitaryStates.unknown,
+        "context": ContainerContexts.neutral,
         "ttl_remaining_time": 300,
         "last_event_timestamp": time.time(),
     }
@@ -150,11 +150,11 @@ if __name__ == "__main__":
 
     container.process_event(
         "tray_1",
-        ContainerEvents.INTERACTION,
-        event_type=ContainerContexts.FOOD
+        ContainerEvents.interaction,
+        event_type=ContainerContexts.food
     )
 
     container.process_event(
         "tray_1",
-        ContainerEvents.TTL_EXPIRED
+        ContainerEvents.ttl_expired
     )

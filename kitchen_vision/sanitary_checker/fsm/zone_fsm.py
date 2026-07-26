@@ -4,35 +4,35 @@ from typing import Optional, Dict, Any
 
 
 class ZoneEvents(enum.Enum):
-    INTERACTION = "INTERACTION"
-    CONTAMINATION_EVENT = "CONTAMINATION_EVENT"
-    SANITIZATION_EVENT = "SANITIZATION_EVENT"
-    OBS_EVENT = "OBS_EVENT"
-    TTL_EXPIRED = "TTL_EXPIRED"
+    interaction = "interaction"
+    contamination_event = "contamination_event"
+    sanitization_event = "sanitization_event"
+    obs_event = "obs_event"
+    ttl_expired = "ttl_expired"
 
 
 class ZoneContexts(enum.Enum):
-    UNKNOWN = "UNKNOWN"
-    NEUTRAL = "NEUTRAL"
-    RAW_ANIMAL = "RAW_ANIMAL"
-    RTE_FOOD = "RTE_FOOD"
-    CONTAMINATED = "CONTAMINATED"
-    SANITIZED = "SANITIZED"
-    IN_USE = "IN_USE"
-    OBS_LOST = "OBS_LOST"
-    RAW_FOOD = "RAW_FOOD"
-    HANDS = "HANDS"
-    FOOD = "FOOD"
-    TOOL = "TOOL"
-    CONTAINER = "CONTAINER"
-    SURFACE = "SURFACE"
+    unknown = "unknown"
+    neutral = "neutral"
+    raw_animal = "raw_animal"
+    rte_food = "rte_food"
+    contaminated = "contaminated"
+    sanitized = "sanitized"
+    in_use = "in_use"
+    obs_lost = "obs_lost"
+    raw_food = "raw_food"
+    hands = "hands"
+    food = "food"
+    tool = "tool"
+    container = "container"
+    surface = "surface"
 
 
 class ZoneSanitaryStates(enum.Enum):
-    CLEAN_CONFIRMED = "CLEAN_CONFIRMED"
-    CLEAN_DEGRADING = "CLEAN_DEGRADING"
-    UNKNOWN = "UNKNOWN"
-    CONTAMINATED = "CONTAMINATED"
+    clean_confirmed = "clean_confirmed"
+    clean_degrading = "clean_degrading"
+    unknown = "unknown"
+    contaminated = "contaminated"
 
 
 class ZoneContextFSM:
@@ -45,14 +45,14 @@ class ZoneContextFSM:
     def _get_current_context(self, track_id: str) -> ZoneContexts:
         data = self._data.get(track_id)
         if not data:
-            return self._context.UNKNOWN
-        return data.get("context", self._context.UNKNOWN)
+            return self._context.unknown
+        return data.get("context", self._context.unknown)
 
     def _get_current_state(self, track_id: str) -> ZoneSanitaryStates:
         data = self._data.get(track_id)
         if not data:
-            return self._sanitary_states.UNKNOWN
-        return data.get("sanitary_state", self._sanitary_states.UNKNOWN)
+            return self._sanitary_states.unknown
+        return data.get("sanitary_state", self._sanitary_states.unknown)
 
     def set_context(self, track_id: str, new_context: ZoneContexts) -> None:
         if track_id in self._data:
@@ -70,47 +70,47 @@ class ZoneContextFSM:
     ) -> None:
         current_context = self._get_current_context(track_id)
 
-        if (event == ZoneEvents.INTERACTION and
-                event_type in (self._context.FOOD, self._context.TOOL, self._context.CONTAINER,
-                               self._context.SURFACE) and
-                current_context in (self._context.UNKNOWN, self._context.NEUTRAL)):
-            self.set_context(track_id, self._context.IN_USE)
+        if (event == ZoneEvents.interaction and
+                event_type in (self._context.food, self._context.tool, self._context.container,
+                               self._context.surface) and
+                current_context in (self._context.unknown, self._context.neutral)):
+            self.set_context(track_id, self._context.in_use)
             return
 
-        if (event == ZoneEvents.CONTAMINATION_EVENT and
-                event_type == self._context.RAW_FOOD and
-                current_context in (self._context.UNKNOWN, self._context.NEUTRAL, self._context.IN_USE)):
-            self.set_context(track_id, self._context.RAW_ANIMAL)
-            self.set_sanitary_state(track_id, self._sanitary_states.CONTAMINATED)
+        if (event == ZoneEvents.contamination_event and
+                event_type == self._context.raw_food and
+                current_context in (self._context.unknown, self._context.neutral, self._context.in_use)):
+            self.set_context(track_id, self._context.raw_animal)
+            self.set_sanitary_state(track_id, self._sanitary_states.contaminated)
             return
 
-        if (event == ZoneEvents.SANITIZATION_EVENT and
-                current_context in (self._context.RAW_ANIMAL, self._context.CONTAMINATED, self._context.IN_USE)):
-            self.set_context(track_id, self._context.SANITIZED)
-            self.set_sanitary_state(track_id, self._sanitary_states.CLEAN_CONFIRMED)
+        if (event == ZoneEvents.sanitization_event and
+                current_context in (self._context.raw_animal, self._context.contaminated, self._context.in_use)):
+            self.set_context(track_id, self._context.sanitized)
+            self.set_sanitary_state(track_id, self._sanitary_states.clean_confirmed)
             return
 
-        if (event == ZoneEvents.INTERACTION and
-                event_type == self._context.HANDS and
-                current_context == self._context.SANITIZED):
-            self.set_context(track_id, self._context.IN_USE)
-            self.set_sanitary_state(track_id, self._sanitary_states.CLEAN_DEGRADING)
+        if (event == ZoneEvents.interaction and
+                event_type == self._context.hands and
+                current_context == self._context.sanitized):
+            self.set_context(track_id, self._context.in_use)
+            self.set_sanitary_state(track_id, self._sanitary_states.clean_degrading)
             return
 
-        if event == ZoneEvents.TTL_EXPIRED:
-            self.set_context(track_id, self._context.UNKNOWN)
+        if event == ZoneEvents.ttl_expired:
+            self.set_context(track_id, self._context.unknown)
             return
 
-        if (event == ZoneEvents.OBS_EVENT and
-                event_type == self._context.OBS_LOST):
-            self.set_context(track_id, self._context.UNKNOWN)
+        if (event == ZoneEvents.obs_event and
+                event_type == self._context.obs_lost):
+            self.set_context(track_id, self._context.unknown)
             return
 
     def add_data_by_track_id(self, track_id: str, data: Dict[str, Any]) -> None:
         if "context" not in data:
-            data["context"] = self._context.UNKNOWN
+            data["context"] = self._context.unknown
         if "sanitary_state" not in data:
-            data["sanitary_state"] = self._sanitary_states.UNKNOWN
+            data["sanitary_state"] = self._sanitary_states.unknown
         if "ttl_remaining_time" not in data:
             data["ttl_remaining_time"] = 0
         if "last_event_timestamp" not in data:
@@ -144,8 +144,8 @@ if __name__ == "__main__":
     payload = {
         "zone_id": "prep_zone_1",
         "entity_type": "zone",
-        "sanitary_state": ZoneSanitaryStates.UNKNOWN,
-        "context": ZoneContexts.NEUTRAL,
+        "sanitary_state": ZoneSanitaryStates.unknown,
+        "context": ZoneContexts.neutral,
         "ttl_remaining_time": 900,
         "last_event_timestamp": time.time(),
     }
@@ -154,11 +154,11 @@ if __name__ == "__main__":
 
     zone.process_event(
         "prep_zone_1",
-        ZoneEvents.INTERACTION,
-        event_type=ZoneContexts.FOOD
+        ZoneEvents.interaction,
+        event_type=ZoneContexts.food
     )
 
     zone.process_event(
         "prep_zone_1",
-        ZoneEvents.TTL_EXPIRED
+        ZoneEvents.ttl_expired
     )

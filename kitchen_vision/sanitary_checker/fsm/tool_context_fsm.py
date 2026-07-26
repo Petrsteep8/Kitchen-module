@@ -4,32 +4,32 @@ from typing import Optional, Dict, Any
 
 
 class ToolEvents(enum.Enum):
-    INTERACTION = "INTERACTION"
-    CONTAMINATION_EVENT = "CONTAMINATION_EVENT"
-    SANITIZATION_EVENT = "SANITIZATION_EVENT"
-    OBS_EVENT = "OBS_EVENT"
-    TTL_EXPIRED = "TTL_EXPIRED"
+    interaction = "interaction"
+    contamination_event = "contamination_event"
+    sanitization_event = "sanitization_event"
+    obs_event = "obs_event"
+    ttl_expired = "ttl_expired"
 
 
 class ToolContexts(enum.Enum):
-    UNKNOWN = "UNKNOWN"
-    NEUTRAL = "NEUTRAL"
-    RAW_ANIMAL = "RAW_ANIMAL"
-    RTE_FOOD = "RTE_FOOD"
-    CONTAMINATED = "CONTAMINATED"
-    SANITIZED = "SANITIZED"
-    IN_USE = "IN_USE"
-    OBS_LOST = "OBS_LOST"
-    RAW_FOOD = "RAW_FOOD"
-    HANDS = "HANDS"
-    FOOD = "FOOD"
+    unknown = "unknown"
+    neutral = "neutral"
+    raw_animal = "raw_animal"
+    rte_food = "rte_food"
+    contaminated = "contaminated"
+    sanitized = "sanitized"
+    in_use = "in_use"
+    obs_lost = "obs_lost"
+    raw_food = "raw_food"
+    hands = "hands"
+    food = "food"
 
 
 class ToolSanitaryStates(enum.Enum):
-    CLEAN_CONFIRMED = "CLEAN_CONFIRMED"
-    CLEAN_DEGRADING = "CLEAN_DEGRADING"
-    UNKNOWN = "UNKNOWN"
-    CONTAMINATED = "CONTAMINATED"
+    clean_confirmed = "clean_confirmed"
+    clean_degrading = "clean_degrading"
+    unknown = "unknown"
+    contaminated = "contaminated"
 
 
 class ToolContextFSM:
@@ -42,14 +42,14 @@ class ToolContextFSM:
     def _get_current_context(self, track_id: str) -> ToolContexts:
         data = self._data.get(track_id)
         if not data:
-            return self._context.UNKNOWN
-        return data.get("context", self._context.UNKNOWN)
+            return self._context.unknown
+        return data.get("context", self._context.unknown)
 
     def _get_current_state(self, track_id: str) -> ToolSanitaryStates:
         data = self._data.get(track_id)
         if not data:
-            return self._sanitary_states.UNKNOWN
-        return data.get("sanitary_state", self._sanitary_states.UNKNOWN)
+            return self._sanitary_states.unknown
+        return data.get("sanitary_state", self._sanitary_states.unknown)
 
     def set_context(self, track_id: str, new_context: ToolContexts) -> None:
         if track_id in self._data:
@@ -67,45 +67,45 @@ class ToolContextFSM:
     ) -> None:
         current_context = self._get_current_context(track_id)
 
-        if (event == ToolEvents.INTERACTION and
-                event_type == self._context.FOOD and
-                current_context in (self._context.UNKNOWN, self._context.NEUTRAL)):
-            self.set_context(track_id, self._context.IN_USE)
+        if (event == ToolEvents.interaction and
+                event_type == self._context.food and
+                current_context in (self._context.unknown, self._context.neutral)):
+            self.set_context(track_id, self._context.in_use)
             return
 
-        if (event == ToolEvents.CONTAMINATION_EVENT and
-                event_type == self._context.RAW_FOOD and
-                current_context in (self._context.UNKNOWN, self._context.NEUTRAL, self._context.IN_USE)):
-            self.set_context(track_id, self._context.RAW_ANIMAL)
+        if (event == ToolEvents.contamination_event and
+                event_type == self._context.raw_food and
+                current_context in (self._context.unknown, self._context.neutral, self._context.in_use)):
+            self.set_context(track_id, self._context.raw_animal)
             return
 
-        if (event == ToolEvents.SANITIZATION_EVENT and
-                current_context in (self._context.RAW_ANIMAL, self._context.CONTAMINATED, self._context.IN_USE)):
-            self.set_context(track_id, self._context.SANITIZED)
-            self.set_sanitary_state(track_id, self._sanitary_states.CLEAN_CONFIRMED)
+        if (event == ToolEvents.sanitization_event and
+                current_context in (self._context.raw_animal, self._context.contaminated, self._context.in_use)):
+            self.set_context(track_id, self._context.sanitized)
+            self.set_sanitary_state(track_id, self._sanitary_states.clean_confirmed)
             return
 
-        if (event == ToolEvents.INTERACTION and
-                event_type == self._context.HANDS and
-                current_context == self._context.SANITIZED):
-            self.set_context(track_id, self._context.IN_USE)
-            self.set_sanitary_state(track_id, self._sanitary_states.CLEAN_DEGRADING)
+        if (event == ToolEvents.interaction and
+                event_type == self._context.hands and
+                current_context == self._context.sanitized):
+            self.set_context(track_id, self._context.in_use)
+            self.set_sanitary_state(track_id, self._sanitary_states.clean_degrading)
             return
 
-        if event == ToolEvents.TTL_EXPIRED:
-            self.set_context(track_id, self._context.UNKNOWN)
+        if event == ToolEvents.ttl_expired:
+            self.set_context(track_id, self._context.unknown)
             return
 
-        if (event == ToolEvents.OBS_EVENT and
-                event_type == self._context.OBS_LOST):
-            self.set_context(track_id, self._context.UNKNOWN)
+        if (event == ToolEvents.obs_event and
+                event_type == self._context.obs_lost):
+            self.set_context(track_id, self._context.unknown)
             return
 
     def add_data_by_track_id(self, track_id: str, data: Dict[str, Any]) -> None:
         if "context" not in data:
-            data["context"] = self._context.UNKNOWN
+            data["context"] = self._context.unknown
         if "sanitary_state" not in data:
-            data["sanitary_state"] = self._sanitary_states.UNKNOWN
+            data["sanitary_state"] = self._sanitary_states.unknown
         if "ttl_remaining_time" not in data:
             data["ttl_remaining_time"] = 0
         if "last_event_timestamp" not in data:
@@ -139,8 +139,8 @@ if __name__ == "__main__":
     payload = {
         "tool_id": "knife_1",
         "entity_type": "tool",
-        "sanitary_state": ToolSanitaryStates.UNKNOWN,
-        "context": ToolContexts.NEUTRAL,
+        "sanitary_state": ToolSanitaryStates.unknown,
+        "context": ToolContexts.neutral,
         "ttl_remaining_time": 120,
         "last_event_timestamp": time.time(),
     }
@@ -149,13 +149,13 @@ if __name__ == "__main__":
 
     tool.process_event(
         "knife_1",
-        ToolEvents.INTERACTION,
-        event_type=ToolContexts.FOOD
+        ToolEvents.interaction,
+        event_type=ToolContexts.food
     )
     print(tool.get_data_by_track_id('knife_1'))
 
     tool.process_event(
         "knife_1",
-        ToolEvents.TTL_EXPIRED
+        ToolEvents.ttl_expired
     )
     print(tool.get_data_by_track_id('knife_1'))

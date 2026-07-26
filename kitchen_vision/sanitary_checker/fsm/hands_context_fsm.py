@@ -4,32 +4,32 @@ from typing import Optional, Dict, Any
 
 
 class HandsEvents(enum.Enum):
-    INTERACTION = "INTERACTION"
-    CONTAMINATION_EVENT = "CONTAMINATION_EVENT"
-    OBS_EVENT = "OBS_EVENT"
-    TTL_EXPIRED = "TTL_EXPIRED"
+    interaction = "interaction"
+    contamination_event = "contamination_event"
+    obs_event = "obs_event"
+    ttl_expired = "ttl_expired"
 
 
 class HandsContexts(enum.Enum):
-    UNKNOWN = "UNKNOWN"
-    NEUTRAL = "NEUTRAL"
-    RAW_ANIMAL = "RAW_ANIMAL"
-    NONFOOD_CONTACT = "NONFOOD_CONTACT"
-    CONTAMINATED = "CONTAMINATED"
-    SANITIZED = "SANITIZED"
-    CLEAN_PREP = "CLEAN_PREP"
-    OBS_LOST = "OBS_LOST"
-    RAW_FOOD = "RAW_FOOD"
-    TOOL = "TOOL"
-    FOOD = "FOOD"
+    unknown = "unknown"
+    neutral = "neutral"
+    raw_animal = "raw_animal"
+    nonfood_contact = "nonfood_contact"
+    contaminated = "contaminated"
+    sanitized = "sanitized"
+    clean_prep = "clean_prep"
+    obs_lost = "obs_lost"
+    raw_food = "raw_food"
+    tool = "tool"
+    food = "food"
 
 
 class HandsSanitaryStates(enum.Enum):
-    CLEAN_CONFIRMED = "CLEAN_CONFIRMED"
-    CLEAN_DEGRADING = "CLEAN_DEGRADING"
-    SANITIZED = "SANITIZED"
-    UNKNOWN = "UNKNOWN"
-    CONTAMINATED = "CONTAMINATED"
+    clean_confirmed = "clean_confirmed"
+    clean_degrading = "clean_degrading"
+    sanitized = "sanitized"
+    unknown = "unknown"
+    contaminated = "contaminated"
 
 
 class HandsContextFSM:
@@ -42,14 +42,14 @@ class HandsContextFSM:
     def _get_current_context(self, track_id: str) -> HandsContexts:
         data = self._data.get(track_id)
         if not data:
-            return self._context.UNKNOWN
-        return data.get("context", self._context.UNKNOWN)
+            return self._context.unknown
+        return data.get("context", self._context.unknown)
 
     def _get_current_state(self, track_id: str) -> HandsSanitaryStates:
         data = self._data.get(track_id)
         if not data:
-            return self._sanitary_states.UNKNOWN
-        return data.get("sanitary_state", self._sanitary_states.UNKNOWN)
+            return self._sanitary_states.unknown
+        return data.get("sanitary_state", self._sanitary_states.unknown)
 
     def set_context(self, track_id: str, new_context: HandsContexts) -> None:
         if track_id in self._data:
@@ -67,44 +67,44 @@ class HandsContextFSM:
     ) -> None:
         current_context = self._get_current_context(track_id)
 
-        if (event == HandsEvents.INTERACTION and
-                event_type == self._context.TOOL and
-                current_context in (self._context.UNKNOWN, self._context.NEUTRAL)):
-            self.set_context(track_id, self._context.RAW_ANIMAL)
+        if (event == HandsEvents.interaction and
+                event_type == self._context.tool and
+                current_context in (self._context.unknown, self._context.neutral)):
+            self.set_context(track_id, self._context.raw_animal)
             return
 
-        if (event == HandsEvents.CONTAMINATION_EVENT and
-                event_type == self._context.NONFOOD_CONTACT and
-                current_context in (self._context.UNKNOWN, self._context.NEUTRAL)):
-            self.set_context(track_id, self._context.NONFOOD_CONTACT)
+        if (event == HandsEvents.contamination_event and
+                event_type == self._context.nonfood_contact and
+                current_context in (self._context.unknown, self._context.neutral)):
+            self.set_context(track_id, self._context.nonfood_contact)
             return
 
-        if (event == HandsEvents.CONTAMINATION_EVENT and
-                event_type == self._context.RAW_FOOD and
-                current_context in (self._context.UNKNOWN, self._context.NEUTRAL)):
-            self.set_context(track_id, self._context.CONTAMINATED)
+        if (event == HandsEvents.contamination_event and
+                event_type == self._context.raw_food and
+                current_context in (self._context.unknown, self._context.neutral)):
+            self.set_context(track_id, self._context.contaminated)
             return
 
-        if (event == HandsEvents.INTERACTION and
-                event_type == self._context.FOOD and
-                current_context == self._context.SANITIZED):
-            self.set_context(track_id, self._context.CLEAN_PREP)
+        if (event == HandsEvents.interaction and
+                event_type == self._context.food and
+                current_context == self._context.sanitized):
+            self.set_context(track_id, self._context.clean_prep)
             return
 
-        if event == HandsEvents.TTL_EXPIRED:
-            self.set_context(track_id, self._context.UNKNOWN)
+        if event == HandsEvents.ttl_expired:
+            self.set_context(track_id, self._context.unknown)
             return
 
-        if (event == HandsEvents.OBS_EVENT and
-                event_type == self._context.OBS_LOST):
-            self.set_context(track_id, self._context.UNKNOWN)
+        if (event == HandsEvents.obs_event and
+                event_type == self._context.obs_lost):
+            self.set_context(track_id, self._context.unknown)
             return
 
     def add_data_by_track_id(self, track_id: str, data: Dict[str, Any]) -> None:
         if "context" not in data:
-            data["context"] = self._context.UNKNOWN
+            data["context"] = self._context.unknown
         if "sanitary_state" not in data:
-            data["sanitary_state"] = self._sanitary_states.UNKNOWN
+            data["sanitary_state"] = self._sanitary_states.unknown
         if "ttl_remaining_time" not in data:
             data["ttl_remaining_time"] = 0
         if "last_event_timestamp" not in data:
@@ -138,8 +138,8 @@ if __name__ == "__main__":
     payload = {
         "employee_id": 1,
         "entity_type": "hands",
-        "sanitary_state": HandsSanitaryStates.UNKNOWN,
-        "context": HandsContexts.NEUTRAL,
+        "sanitary_state": HandsSanitaryStates.unknown,
+        "context": HandsContexts.neutral,
         "ttl_remaining_time": 60,
         "last_event_timestamp": time.time(),
     }
@@ -148,11 +148,11 @@ if __name__ == "__main__":
 
     hands.process_event(
         str(1),
-        HandsEvents.INTERACTION,
-        event_type=HandsContexts.TOOL
+        HandsEvents.interaction,
+        event_type=HandsContexts.tool
     )
 
     hands.process_event(
         str(1),
-        HandsEvents.TTL_EXPIRED
+        HandsEvents.ttl_expired
     )
