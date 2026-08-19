@@ -1,52 +1,52 @@
 import time
-import enum
 from typing import Optional, Dict, Any
 
+# Замена enum-классов на словари с именами в UPPER_CASE
+EMPLOYEE_EVENTS: Dict[str, str] = {
+    "context_observed_raw_animal": "context_observed_raw_animal",
+    "context_observed_clean_prep": "context_observed_clean_prep",
+    "context_observed_ready_to_eat": "context_observed_ready_to_eat",
+    "zone_enter": "zone_enter",
+    "zone_exit": "zone_exit",
+    "contamination_event": "contamination_event",
+    "reset_event": "reset_event",
+    "ttl_expired": "ttl_expired",
+    "obs_event": "obs_event",
+}
 
-class EmployeeEvents(enum.Enum):
-    context_observed_raw_animal = "context_observed_raw_animal"
-    context_observed_clean_prep = "context_observed_clean_prep"
-    context_observed_ready_to_eat = "context_observed_ready_to_eat"
-    zone_enter = "zone_enter"
-    zone_exit = "zone_exit"
-    contamination_event = "contamination_event"
-    reset_event = "reset_event"
-    ttl_expired = "ttl_expired"
-    obs_event = "obs_event"
+EMPLOYEE_CONTEXTS: Dict[str, str] = {
+    "unknown": "unknown",
+    "neutral": "neutral",
+    "raw_animal": "raw_animal",
+    "raw_plant_unwashed": "raw_plant_unwashed",
+    "clean_prep": "clean_prep",
+    "ready_to_eat": "ready_to_eat",
+    "packaging_dispatch": "packaging_dispatch",
+    "waste": "waste",
+    "dirty_dishes_containers": "dirty_dishes_containers",
+    "cleaning_inventory": "cleaning_inventory",
+    "nonfood_contact": "nonfood_contact",
+    "dirty_zone": "dirty_zone",
+    "clean_zone": "clean_zone",
+    "sanitized": "sanitized",
+    "contaminated": "contaminated",
+    "mixed": "mixed",
+    "reset_pending": "reset_pending",
+    "temporarily_blocked": "temporarily_blocked",
+    "pending_resolution": "pending_resolution",
+    "obs_lost": "obs_lost",
+    "entered_reset_zone": "entered_reset_zone",
+    "passed_clean_gate": "passed_clean_gate",
+    "shift_started": "shift_started",
+    "returned_to_kitchen": "returned_to_kitchen",
+}
 
-
-class EmployeeContexts(enum.Enum):
-    unknown = "unknown"
-    neutral = "neutral"
-    raw_animal = "raw_animal"
-    raw_plant_unwashed = "raw_plant_unwashed"
-    clean_prep = "clean_prep"
-    ready_to_eat = "ready_to_eat"
-    packaging_dispatch = "packaging_dispatch"
-    waste = "waste"
-    dirty_dishes_containers = "dirty_dishes_containers"
-    cleaning_inventory = "cleaning_inventory"
-    nonfood_contact = "nonfood_contact"
-    dirty_zone = "dirty_zone"
-    clean_zone = "clean_zone"
-    sanitized = "sanitized"
-    contaminated = "contaminated"
-    mixed = "mixed"
-    reset_pending = "reset_pending"
-    temporarily_blocked = "temporarily_blocked"
-    pending_resolution = "pending_resolution"
-    obs_lost = "obs_lost"
-    entered_reset_zone = "entered_reset_zone"
-    passed_clean_gate = "passed_clean_gate"
-    shift_started = "shift_started"
-    returned_to_kitchen = "returned_to_kitchen"
-
-
-class EmployeeSanitaryStates(enum.Enum):
-    clean_confirmed = "clean_confirmed"
-    clean_degrading = "clean_degrading"
-    unknown = "unknown"
-    contaminated = "contaminated"
+EMPLOYEE_SANITARY_STATES: Dict[str, str] = {
+    "clean_confirmed": "clean_confirmed",
+    "clean_degrading": "clean_degrading",
+    "unknown": "unknown",
+    "contaminated": "contaminated",
+}
 
 
 class EmployeeContextFSM:
@@ -69,38 +69,44 @@ class EmployeeContextFSM:
 
     def __init__(self):
         self._data: Dict[str, Dict[str, Any]] = {}
-        self._event_types = EmployeeEvents
-        self._context = EmployeeContexts
-        self._sanitary_states = EmployeeSanitaryStates
+        self._event_types = EMPLOYEE_EVENTS
+        self._context = EMPLOYEE_CONTEXTS
+        self._sanitary_states = EMPLOYEE_SANITARY_STATES
 
         self._contaminating_contexts = {
-            self._context.raw_animal,
-            self._context.raw_plant_unwashed,
-            self._context.waste,
-            self._context.dirty_dishes_containers,
-            self._context.cleaning_inventory,
-            self._context.nonfood_contact,
-            self._context.dirty_zone,
-            self._context.contaminated,
+            self._context["raw_animal"],
+            self._context["raw_plant_unwashed"],
+            self._context["waste"],
+            self._context["dirty_dishes_containers"],
+            self._context["cleaning_inventory"],
+            self._context["nonfood_contact"],
+            self._context["dirty_zone"],
+            self._context["contaminated"],
         }
 
-    def _get_current_context(self, track_id: str) -> EmployeeContexts:
+    def _get_current_context(self, track_id: str) -> str:
         data = self._data.get(track_id)
         if not data:
-            return self._context.unknown
-        return data.get("context", self._context.unknown)
+            return self._context["unknown"]
+        return data.get("context", self._context["unknown"])
 
-    def _get_current_state(self, track_id: str) -> EmployeeSanitaryStates:
+    def _get_current_state(self, track_id: str) -> str:
         data = self._data.get(track_id)
         if not data:
-            return self._sanitary_states.unknown
-        return data.get("sanitary_state", self._sanitary_states.unknown)
+            return self._sanitary_states["unknown"]
+        return data.get("sanitary_state", self._sanitary_states["unknown"])
 
-    def set_context(self, track_id: str, new_context: EmployeeContexts) -> None:
+    def _get_last_event_timestamp(self, track_id: str) -> float:
+        data = self._data.get(track_id)
+        if not data:
+            return 0.0
+        return data.get("last_event_timestamp", 0.0)
+
+    def set_context(self, track_id: str, new_context: str) -> None:
         if track_id in self._data:
             self._data[track_id]["context"] = new_context
 
-    def set_sanitary_state(self, track_id: str, new_state: EmployeeSanitaryStates) -> None:
+    def set_sanitary_state(self, track_id: str, new_state: str) -> None:
         if track_id in self._data:
             self._data[track_id]["sanitary_state"] = new_state
 
@@ -108,83 +114,98 @@ class EmployeeContextFSM:
         if track_id in self._data:
             self._data[track_id]["reset_pending"] = reset_pending
 
+    def set_ttl_remaining(self, track_id: str, new_ttl: int) -> None:
+        if track_id in self._data:
+            self._data[track_id]["ttl_remaining"] = new_ttl
+
+    def update_ttl_remaining(self, track_id: str, additional_ttl: int) -> None:
+        if track_id in self._data:
+            self._data[track_id]["ttl_remaining"] += additional_ttl
+
+    def update_last_event_timestamp(self, track_id: str):
+        if track_id in self._data:
+            self._data[track_id]["last_event_timestamp"] = time.time()
+
+    def get_last_event_timestamp(self, track_id: str) -> float:
+        return self._get_last_event_timestamp(track_id)
+
     def process_event(
             self,
             track_id: str,
-            event: EmployeeEvents,
-            event_type: Optional[EmployeeContexts] = None,
+            event: str,
+            event_type: Optional[str] = None,
     ) -> None:
         current_context = self._get_current_context(track_id)
 
-        if (event == EmployeeEvents.context_observed_raw_animal and
-                current_context == self._context.unknown):
-            self.set_context(track_id, self._context.raw_animal)
+        if (event == EMPLOYEE_EVENTS["context_observed_raw_animal"] and
+                current_context == self._context["unknown"]):
+            self.set_context(track_id, self._context["raw_animal"])
             return
 
-        if (event == EmployeeEvents.context_observed_clean_prep and
-                current_context == self._context.unknown):
-            self.set_context(track_id, self._context.clean_prep)
+        if (event == EMPLOYEE_EVENTS["context_observed_clean_prep"] and
+                current_context == self._context["unknown"]):
+            self.set_context(track_id, self._context["clean_prep"])
             return
 
-        if (event == EmployeeEvents.context_observed_ready_to_eat and
-                current_context == self._context.unknown):
-            self.set_context(track_id, self._context.ready_to_eat)
+        if (event == EMPLOYEE_EVENTS["context_observed_ready_to_eat"] and
+                current_context == self._context["unknown"]):
+            self.set_context(track_id, self._context["ready_to_eat"])
             return
 
-        if (event == EmployeeEvents.zone_enter and
-                event_type == self._context.dirty_zone):
-            self.set_context(track_id, self._context.dirty_zone)
-            self.set_sanitary_state(track_id, self._sanitary_states.contaminated)
+        if (event == EMPLOYEE_EVENTS["zone_enter"] and
+                event_type == self._context["dirty_zone"]):
+            self.set_context(track_id, self._context["dirty_zone"])
+            self.set_sanitary_state(track_id, self._sanitary_states["contaminated"])
             return
 
-        if (event == EmployeeEvents.zone_enter and
-                event_type == self._context.clean_zone):
-            self.set_context(track_id, self._context.clean_zone)
+        if (event == EMPLOYEE_EVENTS["zone_enter"] and
+                event_type == self._context["clean_zone"]):
+            self.set_context(track_id, self._context["clean_zone"])
             return
 
-        if event == EmployeeEvents.zone_exit:
-            self.set_context(track_id, self._context.neutral)
+        if event == EMPLOYEE_EVENTS["zone_exit"]:
+            self.set_context(track_id, self._context["neutral"])
             return
 
-        if (event == EmployeeEvents.contamination_event and
-                event_type == self._context.nonfood_contact):
-            self.set_context(track_id, self._context.nonfood_contact)
-            self.set_sanitary_state(track_id, self._sanitary_states.contaminated)
+        if (event == EMPLOYEE_EVENTS["contamination_event"] and
+                event_type == self._context["nonfood_contact"]):
+            self.set_context(track_id, self._context["nonfood_contact"])
+            self.set_sanitary_state(track_id, self._sanitary_states["contaminated"])
             return
 
-        if event == EmployeeEvents.reset_event:
+        if event == EMPLOYEE_EVENTS["reset_event"]:
             reset_types = {
-                self._context.entered_reset_zone,
-                self._context.passed_clean_gate,
-                self._context.shift_started,
-                self._context.returned_to_kitchen,
+                self._context["entered_reset_zone"],
+                self._context["passed_clean_gate"],
+                self._context["shift_started"],
+                self._context["returned_to_kitchen"],
             }
             if event_type in reset_types:
-                if event_type == self._context.shift_started:
-                    self.set_sanitary_state(track_id, self._sanitary_states.clean_confirmed)
-                    self.set_context(track_id, self._context.sanitized)
+                if event_type == self._context["shift_started"]:
+                    self.set_sanitary_state(track_id, self._sanitary_states["clean_confirmed"])
+                    self.set_context(track_id, self._context["sanitized"])
                 else:
-                    self.set_context(track_id, self._context.reset_pending)
+                    self.set_context(track_id, self._context["reset_pending"])
                     if track_id in self._data:
                         self._data[track_id]["reset_pending"] = True
                 return
 
-        if event == EmployeeEvents.ttl_expired:
-            self.set_context(track_id, self._context.unknown)
-            self.set_sanitary_state(track_id, self._sanitary_states.unknown)
+        if event == EMPLOYEE_EVENTS["ttl_expired"]:
+            self.set_context(track_id, self._context["unknown"])
+            self.set_sanitary_state(track_id, self._sanitary_states["unknown"])
             return
 
-        if (event == EmployeeEvents.obs_event and
-                event_type == self._context.obs_lost):
-            self.set_context(track_id, self._context.unknown)
-            self.set_sanitary_state(track_id, self._sanitary_states.unknown)
+        if (event == EMPLOYEE_EVENTS["obs_event"] and
+                event_type == self._context["obs_lost"]):
+            self.set_context(track_id, self._context["unknown"])
+            self.set_sanitary_state(track_id, self._sanitary_states["unknown"])
             return
 
     def add_data_by_track_id(self, track_id: str, data: Dict[str, Any]) -> None:
         if "context" not in data:
-            data["context"] = self._context.unknown
+            data["context"] = self._context["unknown"]
         if "sanitary_state" not in data:
-            data["sanitary_state"] = self._sanitary_states.unknown
+            data["sanitary_state"] = self._sanitary_states["unknown"]
         if "reset_pending" not in data:
             data["reset_pending"] = False
         if "ttl_remaining_time" not in data:
@@ -201,10 +222,10 @@ class EmployeeContextFSM:
     def get_data_by_track_id(self, track_id: str) -> Optional[Dict[str, Any]]:
         return self._data.get(track_id)
 
-    def get_context(self, track_id: str) -> EmployeeContexts:
+    def get_context(self, track_id: str) -> str:
         return self._get_current_context(track_id)
 
-    def get_sanitary_state(self, track_id: str) -> EmployeeSanitaryStates:
+    def get_sanitary_state(self, track_id: str) -> str:
         return self._get_current_state(track_id)
 
     def is_reset_pending(self, track_id: str) -> bool:
@@ -226,8 +247,8 @@ if __name__ == "__main__":
     payload = {
         "employee_id": 1,
         "entity_type": "employee",
-        "sanitary_state": EmployeeSanitaryStates.clean_confirmed,
-        "context": EmployeeContexts.unknown,
+        "sanitary_state": EMPLOYEE_SANITARY_STATES["clean_confirmed"],
+        "context": EMPLOYEE_CONTEXTS["unknown"],
         "ttl_remaining_time": 60,
         "last_event_timestamp": time.time(),
         "reset_pending": False
@@ -238,26 +259,26 @@ if __name__ == "__main__":
 
     employee.process_event(
         str(1),
-        EmployeeEvents.zone_enter,
-        event_type=EmployeeContexts.dirty_zone
+        EMPLOYEE_EVENTS["zone_enter"],
+        event_type=EMPLOYEE_CONTEXTS["dirty_zone"]
     )
     print("After DIRTY_ZONE:", employee.get_data_by_track_id(str(1)))
 
     employee.process_event(
         str(1),
-        EmployeeEvents.contamination_event,
-        event_type=EmployeeContexts.nonfood_contact
+        EMPLOYEE_EVENTS["contamination_event"],
+        event_type=EMPLOYEE_CONTEXTS["nonfood_contact"]
     )
     print("After NONFOOD_CONTACT:", employee.get_data_by_track_id(str(1)))
 
     employee.process_event(
         str(1),
-        EmployeeEvents.zone_exit
+        EMPLOYEE_EVENTS["zone_exit"]
     )
     print("After ZONE_EXIT:", employee.get_data_by_track_id(str(1)))
 
     employee.process_event(
         str(1),
-        EmployeeEvents.ttl_expired
+        EMPLOYEE_EVENTS["ttl_expired"]
     )
     print("After TTL_EXPIRED:", employee.get_data_by_track_id(str(1)))
