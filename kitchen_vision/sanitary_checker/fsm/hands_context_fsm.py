@@ -13,14 +13,27 @@ HANDS_CONTEXTS: Dict[str, str] = {
     "unknown": "unknown",
     "neutral": "neutral",
     "raw_animal": "raw_animal",
-    "nonfood_contact": "nonfood_contact",
-    "contaminated": "contaminated",
-    "sanitized": "sanitized",
+    "raw_plant_unwashed": "raw_plant_unwashed",
     "clean_prep": "clean_prep",
+    "ready_to_eat": "ready_to_eat",
+    "packaging_dispatch": "packaging_dispatch",
+    "waste": "waste",
+    "dirty_dishes_containers": "dirty_dishes_containers",
+    "cleaning_inventory": "cleaning_inventory",
+    "nonfood_contact": "nonfood_contact",
+    "dirty_zone": "dirty_zone",
+    "clean_zone": "clean_zone",
+    "sanitized": "sanitized",
+    "contaminated": "contaminated",
+    "mixed": "mixed",
+    "reset_pending": "reset_pending",
+    "temporarily_blocked": "temporarily_blocked",
+    "pending_resolution": "pending_resolution",
     "obs_lost": "obs_lost",
-    "raw_food": "raw_food",
-    "tool": "tool",
-    "food": "food",
+    "entered_reset_zone": "entered_reset_zone",
+    "passed_clean_gate": "passed_clean_gate",
+    "shift_started": "shift_started",
+    "returned_to_kitchen": "returned_to_kitchen",
 }
 
 HANDS_SANITARY_STATES: Dict[str, str] = {
@@ -35,7 +48,7 @@ HANDS_SANITARY_STATES: Dict[str, str] = {
 class HandsContextFSM:
     def __init__(self):
         self._data: Dict[str, Dict[str, Any]] = {}
-        self._event_types = HANDS_EVENTS
+        self._event_detailss = HANDS_EVENTS
         self._context = HANDS_CONTEXTS
         self._sanitary_states = HANDS_SANITARY_STATES
 
@@ -84,32 +97,41 @@ class HandsContextFSM:
             self,
             track_id: str,
             event: str,
-            event_type: Optional[str] = None,
+            event_details: Optional[str] = None,
     ) -> None:
         current_context = self._get_current_context(track_id)
 
         if (event == HANDS_EVENTS["interaction"] and
-                event_type == self._context["tool"] and
+                event_details == self._context["tool"] and
                 current_context in (self._context["unknown"], self._context["neutral"])):
             self.set_context(track_id, self._context["raw_animal"])
-            return
-
-        if (event == HANDS_EVENTS["contamination_event"] and
-                event_type == self._context["nonfood_contact"] and
-                current_context in (self._context["unknown"], self._context["neutral"])):
-            self.set_context(track_id, self._context["nonfood_contact"])
-            return
-
-        if (event == HANDS_EVENTS["contamination_event"] and
-                event_type == self._context["raw_food"] and
-                current_context in (self._context["unknown"], self._context["neutral"])):
-            self.set_context(track_id, self._context["contaminated"])
+            self.set_sanitary_state(track_id, self._context["contaminated"])
             return
 
         if (event == HANDS_EVENTS["interaction"] and
-                event_type == self._context["food"] and
+                event_details == self._context["food"] and
                 current_context == self._context["sanitized"]):
             self.set_context(track_id, self._context["clean_prep"])
+            return
+
+        if (event == HANDS_EVENTS["contamination_event"] and
+                event_details == self._context["nonfood_contact"] and
+                current_context in (self._context["unknown"], self._context["neutral"])):
+            self.set_context(track_id, self._context["nonfood_contact"])
+            self.set_sanitary_state(track_id, self._context["contaminated"])
+            return
+
+        if (event == HANDS_EVENTS["contamination_event"] and
+                event_details == self._context["raw_food"] and
+                current_context in (self._context["unknown"], self._context["neutral"])):
+            self.set_context(track_id, self._context["raw_food"])
+            self.set_sanitary_state(track_id, self._context["contaminated"])
+            return
+
+        if event == HANDS_EVENTS["reset_event"] and event_details in ["hands_washed", "gloves_changed", "gloves_removed",
+                                                                   "gloves_put_on"]:
+            self.set_context(track_id, self._context["sanitized"])
+            self.set_sanitary_state(track_id, self._context["sanitized"])
             return
 
         if event == HANDS_EVENTS["ttl_expired"]:
@@ -117,7 +139,7 @@ class HandsContextFSM:
             return
 
         if (event == HANDS_EVENTS["obs_event"] and
-                event_type == self._context["obs_lost"]):
+                event_details == self._context["obs_lost"]):
             self.set_context(track_id, self._context["unknown"])
             return
 
@@ -170,7 +192,7 @@ if __name__ == "__main__":
     hands.process_event(
         str(1),
         HANDS_EVENTS["interaction"],
-        event_type=HANDS_CONTEXTS["tool"]
+        event_details=HANDS_CONTEXTS["tool"]
     )
 
     hands.process_event(
