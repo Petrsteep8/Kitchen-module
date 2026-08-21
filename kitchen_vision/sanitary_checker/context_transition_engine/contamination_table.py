@@ -134,7 +134,7 @@ class ContaminationTable:
         else:
             return None
 
-    def process_event(self, normalized_event: Dict[str, Any]) -> None:
+    def process_event(self, normalized_event: Dict[str, Any]) -> bool:
         """
         Обработка CONTAMINATION_EVENT
         Применяет таблицу загрязнения, обновляет состояние в FSM
@@ -142,7 +142,7 @@ class ContaminationTable:
         # Проверяем тип события
         if normalized_event.get("event_type") != "contamination_event":
             logger.warning("Expected contamination_event, got: %s", normalized_event.get("event_type"))
-            return
+            return False
 
         payload = normalized_event.get("payload", {})
         confidence = normalized_event.get("confidence", 0.0)
@@ -154,15 +154,15 @@ class ContaminationTable:
         # Валидация
         if not contamination_type or not target_entity or not target_entity_id:
             logger.warning("Missing required fields in contamination event")
-            return
+            return False
 
         if contamination_type not in self._contamination_types:
             logger.warning("Invalid contamination_type: %s", contamination_type)
-            return
+            return False
 
         if target_entity not in self._entity_types:
             logger.warning("Invalid target_entity: %s", target_entity)
-            return
+            return False
 
         # Получаем все правила для данной пары
         key = (contamination_type, target_entity)
@@ -170,7 +170,7 @@ class ContaminationTable:
 
         if not rules:
             logger.debug("No contamination rule for %s -> %s", contamination_type, target_entity)
-            return
+            return False
 
         # Выбираем правило с наивысшим приоритетом
         rules.sort(key=lambda r: (r.priority, r.min_confidence), reverse=True)
@@ -180,14 +180,14 @@ class ContaminationTable:
             logger.debug(
                 f"Contamination rule skipped due to low confidence: {best_rule.min_confidence} > {confidence}"
             )
-            return
+            return False
 
         new_state = best_rule.resulting_state
 
         fsm = self._get_fsm(target_entity)
         if fsm is None:
             logger.warning("No FSM for entity: %s", target_entity)
-            return
+            return False
 
         if hasattr(fsm, 'set_sanitary_state'):
             fsm.set_sanitary_state(track_id=target_entity_id, new_state=new_state)
@@ -196,3 +196,5 @@ class ContaminationTable:
             )
         else:
             logger.warning("FSM does not support set_sanitary_state: %s", fsm)
+
+        return True
