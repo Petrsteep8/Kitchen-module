@@ -14,17 +14,27 @@ ZONE_CONTEXTS: Dict[str, str] = {
     "unknown": "unknown",
     "neutral": "neutral",
     "raw_animal": "raw_animal",
-    "rte_food": "rte_food",
-    "contaminated": "contaminated",
+    "raw_plant_unwashed": "raw_plant_unwashed",
+    "clean_prep": "clean_prep",
+    "ready_to_eat": "ready_to_eat",
+    "packaging_dispatch": "packaging_dispatch",
+    "waste": "waste",
+    "dirty_dishes_containers": "dirty_dishes_containers",
+    "cleaning_inventory": "cleaning_inventory",
+    "nonfood_contact": "nonfood_contact",
+    "dirty_zone": "dirty_zone",
+    "clean_zone": "clean_zone",
     "sanitized": "sanitized",
-    "in_use": "in_use",
+    "contaminated": "contaminated",
+    "mixed": "mixed",
+    "reset_pending": "reset_pending",
+    "temporarily_blocked": "temporarily_blocked",
+    "pending_resolution": "pending_resolution",
     "obs_lost": "obs_lost",
-    "raw_food": "raw_food",
-    "hands": "hands",
-    "food": "food",
-    "tool": "tool",
-    "container": "container",
-    "surface": "surface",
+    "entered_reset_zone": "entered_reset_zone",
+    "passed_clean_gate": "passed_clean_gate",
+    "shift_started": "shift_started",
+    "returned_to_kitchen": "returned_to_kitchen",
 }
 
 ZONE_SANITARY_STATES: Dict[str, str] = {
@@ -38,7 +48,7 @@ ZONE_SANITARY_STATES: Dict[str, str] = {
 class ZoneContextFSM:
     def __init__(self):
         self._data: Dict[str, Dict[str, Any]] = {}
-        self._event_types = ZONE_EVENTS
+        self._event_detailss = ZONE_EVENTS
         self._context = ZONE_CONTEXTS
         self._sanitary_states = ZONE_SANITARY_STATES
 
@@ -87,45 +97,16 @@ class ZoneContextFSM:
             self,
             track_id: str,
             event: str,
-            event_type: Optional[str] = None,
+            event_details: Optional[str] = None,
     ) -> None:
-        current_context = self._get_current_context(track_id)
+        if event == ZONE_EVENTS["zone_enter"] and event_details == "dirty_zone":
+            self.set_context(track_id, self._context["dirty_zone"])
 
-        if (event == ZONE_EVENTS["interaction"] and
-                event_type in (self._context["food"], self._context["tool"], self._context["container"],
-                               self._context["surface"]) and
-                current_context in (self._context["unknown"], self._context["neutral"])):
-            self.set_context(track_id, self._context["in_use"])
-            return
+        if event == ZONE_EVENTS["zone_enter"] and event_details == "clean_zone":
+            self.set_context(track_id, self._context["clean_zone"])
 
-        if (event == ZONE_EVENTS["contamination_event"] and
-                event_type == self._context["raw_food"] and
-                current_context in (self._context["unknown"], self._context["neutral"], self._context["in_use"])):
-            self.set_context(track_id, self._context["raw_animal"])
-            self.set_sanitary_state(track_id, self._sanitary_states["contaminated"])
-            return
-
-        if (event == ZONE_EVENTS["sanitization_event"] and
-                current_context in (self._context["raw_animal"], self._context["contaminated"], self._context["in_use"])):
-            self.set_context(track_id, self._context["sanitized"])
-            self.set_sanitary_state(track_id, self._sanitary_states["clean_confirmed"])
-            return
-
-        if (event == ZONE_EVENTS["interaction"] and
-                event_type == self._context["hands"] and
-                current_context == self._context["sanitized"]):
-            self.set_context(track_id, self._context["in_use"])
-            self.set_sanitary_state(track_id, self._sanitary_states["clean_degrading"])
-            return
-
-        if event == ZONE_EVENTS["ttl_expired"]:
-            self.set_context(track_id, self._context["unknown"])
-            return
-
-        if (event == ZONE_EVENTS["obs_event"] and
-                event_type == self._context["obs_lost"]):
-            self.set_context(track_id, self._context["unknown"])
-            return
+        if event == ZONE_EVENTS["zone_exit"]:
+            self.set_context(track_id, self._context["neutral"])
 
     def add_data_by_track_id(self, track_id: str, data: Dict[str, Any]) -> None:
         if "context" not in data:
@@ -176,7 +157,7 @@ if __name__ == "__main__":
     zone.process_event(
         "prep_zone_1",
         ZONE_EVENTS["interaction"],
-        event_type=ZONE_CONTEXTS["food"]
+        event_details=ZONE_CONTEXTS["food"]
     )
 
     zone.process_event(
