@@ -5,6 +5,8 @@ try:
     from kitchen_vision.sanitary_checker.fsm.container_context_fsm import ContainerContextFSM
     from kitchen_vision.sanitary_checker.fsm.surface_context_fsm import SurfaceContextFSM
     from kitchen_vision.sanitary_checker.fsm.zone_context_fsm import ZoneFSM
+    from kitchen_vision.sanitary_checker.fsm.observation_fsm import ObservationFSM
+    from kitchen_vision.sanitary_checker.fsm.action_termination_fsm import ActionTerminationFSM
 except ImportError as e:
     pass
 
@@ -16,6 +18,8 @@ class FSMHub:
         self._container_context_fsm = ContainerContextFSM() or None
         self._surface_context_fsm = SurfaceContextFSM() or None
         self._zone_context_fsm = ZoneFSM() or None
+        self._observation_fsm = ObservationFSM() or None
+        self._action_termination_fsm = ActionTerminationFSM() or None
 
     @property
     def employee_context(self):
@@ -35,3 +39,9 @@ class FSMHub:
     @property
     def zone_context(self):
         return self._zone_context_fsm
+    @property
+    def observation_fsm(self):
+        return self._observation_fsm
+    @property
+    def action_termination_fsm(self):
+        return self._action_termination_fsm
