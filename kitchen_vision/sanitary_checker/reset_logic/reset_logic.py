@@ -430,7 +430,7 @@ class ResetLogic:
         else:
             logger.warning(f"FSM does not support set_sanitary_state: {fsm}")
 
-    def process_reset_event(self, normalized_event: Dict[str, Any]) -> List[ResetResultForTTL]:
+    def process_reset_event(self, normalized_event: Dict[str, Any]) -> list[Any] | tuple[bool, list[Any]]:
         """
         Args:
             normalized_event: полностью нормализованное событие
@@ -443,7 +443,7 @@ class ResetLogic:
         event_type = normalized_event.get("event_type")
         if event_type != "reset_event":
             logger.warning(f"Expected reset_event, got: {event_type}")
-            return []
+            return False, []
 
         payload = normalized_event.get("payload", {})
         camera_id = normalized_event.get("camera_id", "unknown")
@@ -456,17 +456,17 @@ class ResetLogic:
         # Валидация
         if not self._validate_reset_type(reset_type):
             logger.warning(f"Invalid reset_type: {reset_type}")
-            return []
+            return False, []
 
         if not target_entities or not isinstance(target_entities, dict):
             logger.warning("target_entities must be a dict: {entity_type: track_id}")
-            return []
+            return False, []
 
         # Получение правил для данного reset_type
         rules = self._get_reset_rules(reset_type)
         if not rules:
             logger.warning(f"No rules found for reset_type: {reset_type}")
-            return []
+            return False, []
 
         results = []
 
@@ -494,7 +494,7 @@ class ResetLogic:
 
         self._check_expired_reset_pending()
 
-        return results
+        return True, results
 
     def _check_expired_reset_pending(self) -> None:
         """
@@ -568,7 +568,7 @@ if __name__ == "__main__":
         "confidence": 0.91,
         "time_source": "camera_rtsp",
         "payload": {
-            "reset_type": "shift_started",
+            "reset_type": "hands_washed",
             "target_entities": {
                 "employee": 23,
                 "hands": 12,
