@@ -103,10 +103,8 @@ class ContaminationTable:
 
     def __init__(
         self,
-        fsm_hub: FSMHub,
         config: Optional[Dict[str, Any]] = None,
     ):
-        self._fsm_hub = fsm_hub
         self._config = config or {}
 
         # Канонические словари
@@ -116,23 +114,6 @@ class ContaminationTable:
 
         # Параметры из конфигурации
         self._min_confidence = self._config.get("min_confidence_contamination", 0.6)
-
-    def _get_fsm(self, entity_type: str):
-        """Получение FSM для сущности"""
-        if entity_type == "employee":
-            return self._fsm_hub.employee_context
-        elif entity_type == "hands":
-            return self._fsm_hub.hands_context
-        elif entity_type == "tool":
-            return self._fsm_hub.tool_context
-        elif entity_type == "container":
-            return self._fsm_hub.container_context
-        elif entity_type == "surface":
-            return self._fsm_hub.surface_context
-        elif entity_type == "zone":
-            return self._fsm_hub.zone_context
-        else:
-            return None
 
     def process_event(self, normalized_event: Dict[str, Any]) -> bool:
         """
@@ -183,18 +164,7 @@ class ContaminationTable:
             return False
 
         new_state = best_rule.resulting_state
-
-        fsm = self._get_fsm(target_entity)
-        if fsm is None:
-            logger.warning("No FSM for entity: %s", target_entity)
+        if not new_state:
             return False
-
-        if hasattr(fsm, 'set_sanitary_state'):
-            fsm.set_sanitary_state(track_id=target_entity_id, new_state=new_state)
-            logger.info(
-                f"Contamination applied: {contamination_type} -> {target_entity}:{target_entity_id} -> {new_state}"
-            )
-        else:
-            logger.warning("FSM does not support set_sanitary_state: %s", fsm)
 
         return True
