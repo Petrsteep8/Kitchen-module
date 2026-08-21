@@ -64,7 +64,7 @@ class DecisionTable:
         self,
         normalized_event: Dict[str, Any],
         camera_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[Any] | tuple[bool, list[dict[str, Any]]]:
         """
         Обрабатывает событие и возвращает список сгенерированных SANITARY_EVENT.
 
@@ -84,9 +84,10 @@ class DecisionTable:
             return []
 
         generated_events: List[Dict[str, Any]] = []
+        result: bool = False
 
         if event_type == "interaction":
-            violations = self._context_transfer_table.process_event(normalized_event)
+            result, violations = self._context_transfer_table.process_event(normalized_event)
 
             for violation in violations:
                 sanitary_event = self._create_sanitary_event_from_violation(
@@ -98,9 +99,9 @@ class DecisionTable:
                     generated_events.append(sanitary_event)
 
         elif event_type == "contamination_event":
-            self._contamination_table.process_event(normalized_event)
+            result = self._contamination_table.process_event(normalized_event)
 
-        return generated_events
+        return result, generated_events
 
     def _create_sanitary_event_from_violation(
         self,
