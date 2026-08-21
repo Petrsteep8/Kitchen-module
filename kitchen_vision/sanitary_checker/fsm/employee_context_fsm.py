@@ -1,7 +1,6 @@
 import time
 from typing import Optional, Dict, Any
 
-# Замена enum-классов на словари с именами в UPPER_CASE
 EMPLOYEE_EVENTS: Dict[str, str] = {
     "context_observed_raw_animal": "context_observed_raw_animal",
     "context_observed_clean_prep": "context_observed_clean_prep",
@@ -69,7 +68,7 @@ class EmployeeContextFSM:
 
     def __init__(self):
         self._data: Dict[str, Dict[str, Any]] = {}
-        self._event_types = EMPLOYEE_EVENTS
+        self._event_detailss = EMPLOYEE_EVENTS
         self._context = EMPLOYEE_CONTEXTS
         self._sanitary_states = EMPLOYEE_SANITARY_STATES
 
@@ -133,7 +132,7 @@ class EmployeeContextFSM:
             self,
             track_id: str,
             event: str,
-            event_type: Optional[str] = None,
+            event_details: Optional[str] = None,
     ) -> None:
         current_context = self._get_current_context(track_id)
 
@@ -153,22 +152,17 @@ class EmployeeContextFSM:
             return
 
         if (event == EMPLOYEE_EVENTS["zone_enter"] and
-                event_type == self._context["dirty_zone"]):
+                event_details == self._context["dirty_zone"]):
             self.set_context(track_id, self._context["dirty_zone"])
-            self.set_sanitary_state(track_id, self._sanitary_states["contaminated"])
             return
 
         if (event == EMPLOYEE_EVENTS["zone_enter"] and
-                event_type == self._context["clean_zone"]):
+                event_details == self._context["clean_zone"]):
             self.set_context(track_id, self._context["clean_zone"])
             return
 
-        if event == EMPLOYEE_EVENTS["zone_exit"]:
-            self.set_context(track_id, self._context["neutral"])
-            return
-
         if (event == EMPLOYEE_EVENTS["contamination_event"] and
-                event_type == self._context["nonfood_contact"]):
+                event_details == self._context["nonfood_contact"]):
             self.set_context(track_id, self._context["nonfood_contact"])
             self.set_sanitary_state(track_id, self._sanitary_states["contaminated"])
             return
@@ -180,10 +174,10 @@ class EmployeeContextFSM:
                 self._context["shift_started"],
                 self._context["returned_to_kitchen"],
             }
-            if event_type in reset_types:
-                if event_type == self._context["shift_started"]:
-                    self.set_sanitary_state(track_id, self._sanitary_states["clean_confirmed"])
+            if event_details in reset_types:
+                if event_details == self._context["shift_started"]:
                     self.set_context(track_id, self._context["sanitized"])
+                    self.set_sanitary_state(track_id, self._sanitary_states["clean_confirmed"])
                 else:
                     self.set_context(track_id, self._context["reset_pending"])
                     if track_id in self._data:
@@ -196,7 +190,7 @@ class EmployeeContextFSM:
             return
 
         if (event == EMPLOYEE_EVENTS["obs_event"] and
-                event_type == self._context["obs_lost"]):
+                event_details == self._context["obs_lost"]):
             self.set_context(track_id, self._context["unknown"])
             self.set_sanitary_state(track_id, self._sanitary_states["unknown"])
             return
@@ -260,14 +254,14 @@ if __name__ == "__main__":
     employee.process_event(
         str(1),
         EMPLOYEE_EVENTS["zone_enter"],
-        event_type=EMPLOYEE_CONTEXTS["dirty_zone"]
+        event_details=EMPLOYEE_CONTEXTS["dirty_zone"]
     )
     print("After DIRTY_ZONE:", employee.get_data_by_track_id(str(1)))
 
     employee.process_event(
         str(1),
         EMPLOYEE_EVENTS["contamination_event"],
-        event_type=EMPLOYEE_CONTEXTS["nonfood_contact"]
+        event_details=EMPLOYEE_CONTEXTS["nonfood_contact"]
     )
     print("After NONFOOD_CONTACT:", employee.get_data_by_track_id(str(1)))
 
