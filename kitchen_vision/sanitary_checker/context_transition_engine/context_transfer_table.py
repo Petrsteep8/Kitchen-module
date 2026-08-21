@@ -231,7 +231,7 @@ class ContextTransferTable:
     def process_event(
         self,
         normalized_event: Dict[str, Any],
-    ) -> List[CompatibilityViolation]:
+    ) -> tuple[bool, list[Any]] | list[Any]:
         """
         Обработка INTERACTION события
 
@@ -242,7 +242,7 @@ class ContextTransferTable:
         # Проверяем тип события
         if normalized_event.get("event_type") != "interaction":
             logger.warning("Expected interaction event, got: %s", normalized_event.get("event_type"))
-            return violations
+            return False, violations
 
         payload = normalized_event.get("payload", {})
         camera_id = normalized_event.get("camera_id", "unknown")
@@ -258,7 +258,7 @@ class ContextTransferTable:
         # Валидация
         if not all([source_entity, source_entity_id, target_entity, target_entity_id, interaction_type]):
             logger.warning("Missing required fields in interaction event")
-            return violations
+            return False, violations
 
         # Получаем текущие контексты
         source_context = self._get_context(source_entity, source_entity_id)
@@ -302,4 +302,4 @@ class ContextTransferTable:
         else:
             logger.debug(f"No context change for {target_entity}:{target_entity_id}")
 
-        return violations
+        return True, violations
