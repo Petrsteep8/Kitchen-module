@@ -14,16 +14,27 @@ SURFACE_CONTEXTS: Dict[str, str] = {
     "unknown": "unknown",
     "neutral": "neutral",
     "raw_animal": "raw_animal",
-    "rte_food": "rte_food",
-    "contaminated": "contaminated",
+    "raw_plant_unwashed": "raw_plant_unwashed",
+    "clean_prep": "clean_prep",
+    "ready_to_eat": "ready_to_eat",
+    "packaging_dispatch": "packaging_dispatch",
+    "waste": "waste",
+    "dirty_dishes_containers": "dirty_dishes_containers",
+    "cleaning_inventory": "cleaning_inventory",
+    "nonfood_contact": "nonfood_contact",
+    "dirty_zone": "dirty_zone",
+    "clean_zone": "clean_zone",
     "sanitized": "sanitized",
-    "in_use": "in_use",
+    "contaminated": "contaminated",
+    "mixed": "mixed",
+    "reset_pending": "reset_pending",
+    "temporarily_blocked": "temporarily_blocked",
+    "pending_resolution": "pending_resolution",
     "obs_lost": "obs_lost",
-    "raw_food": "raw_food",
-    "hands": "hands",
-    "food": "food",
-    "tool": "tool",
-    "container": "container",
+    "entered_reset_zone": "entered_reset_zone",
+    "passed_clean_gate": "passed_clean_gate",
+    "shift_started": "shift_started",
+    "returned_to_kitchen": "returned_to_kitchen",
 }
 
 SURFACE_SANITARY_STATES: Dict[str, str] = {
@@ -37,7 +48,7 @@ SURFACE_SANITARY_STATES: Dict[str, str] = {
 class SurfaceContextFSM:
     def __init__(self):
         self._data: Dict[str, Dict[str, Any]] = {}
-        self._event_types = SURFACE_EVENTS
+        self._event_detailss = SURFACE_EVENTS
         self._context = SURFACE_CONTEXTS
         self._sanitary_states = SURFACE_SANITARY_STATES
 
@@ -86,43 +97,36 @@ class SurfaceContextFSM:
             self,
             track_id: str,
             event: str,
-            event_type: Optional[str] = None,
+            event_details: Optional[str] = None,
     ) -> None:
         current_context = self._get_current_context(track_id)
 
-        if (event == SURFACE_EVENTS["interaction"] and
-                event_type in (self._context["food"], self._context["tool"], self._context["container"]) and
-                current_context in (self._context["unknown"], self._context["neutral"])):
-            self.set_context(track_id, self._context["in_use"])
+        if event == SURFACE_EVENTS["interaction"] and event_details == "hands" and current_context in (
+                self._context["unknown"], self._context["neutral"]):
+            self.set_context(track_id, current_context)
             return
 
         if (event == SURFACE_EVENTS["contamination_event"] and
-                event_type == self._context["raw_food"] and
-                current_context in (self._context["unknown"], self._context["neutral"], self._context["in_use"])):
-            self.set_context(track_id, self._context["raw_animal"])
+                event_details in ["raw_food", "waste", "dirty_surface"] and
+                current_context in (self._context["unknown"], self._context["neutral"])):
+            self.set_context(track_id, event_details)
             self.set_sanitary_state(track_id, self._sanitary_states["contaminated"])
             return
 
-        if (event == SURFACE_EVENTS["sanitization_event"] and
-                current_context in (self._context["raw_animal"], self._context["contaminated"], self._context["in_use"])):
+        if event == SURFACE_EVENTS["reset_event"] and event_details in ["surface_sanitized"]:
             self.set_context(track_id, self._context["sanitized"])
             self.set_sanitary_state(track_id, self._sanitary_states["clean_confirmed"])
             return
 
-        if (event == SURFACE_EVENTS["interaction"] and
-                event_type == self._context["hands"] and
-                current_context == self._context["sanitized"]):
-            self.set_context(track_id, self._context["in_use"])
-            self.set_sanitary_state(track_id, self._sanitary_states["clean_degrading"])
-            return
-
         if event == SURFACE_EVENTS["ttl_expired"]:
             self.set_context(track_id, self._context["unknown"])
+            self.set_sanitary_state(track_id, self._sanitary_states["unknown"])
             return
 
         if (event == SURFACE_EVENTS["obs_event"] and
-                event_type == self._context["obs_lost"]):
+                event_details == self._context["obs_lost"]):
             self.set_context(track_id, self._context["unknown"])
+            self.set_sanitary_state(track_id, self._sanitary_states["unknown"])
             return
 
     def add_data_by_track_id(self, track_id: str, data: Dict[str, Any]) -> None:
@@ -174,7 +178,7 @@ if __name__ == "__main__":
     surface.process_event(
         "table_1",
         SURFACE_EVENTS["interaction"],
-        event_type=SURFACE_CONTEXTS["food"]
+        event_details=SURFACE_CONTEXTS["food"]
     )
 
     surface.process_event(
