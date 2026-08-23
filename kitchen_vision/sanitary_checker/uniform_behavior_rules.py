@@ -1,6 +1,16 @@
 import queue
 import threading
 import time
+import uuid
+
+
+SEVERITY_MAP = {
+    "no_cap": ["warning", "warning"],
+    "no_gloves": ["warning", "warning"],
+    "no_apron": ["warning", "warning"],
+    "face_touch": ["warning", "medium"],
+    "phone_usage": ["warning", "medium"],
+}
 
 
 class UniformBehaviorRules(threading.Thread):
@@ -44,8 +54,17 @@ class UniformBehaviorRules(threading.Thread):
         self._detect_phone_usage(pkt)
         self._detect_face_touch(pkt)
 
-    def _generate_sanitary_event(self, event_type: str):
-        pass
+    def _generate_sanitary_event(self, event_type: str, zone_id: str):
+        sanitary_event = {
+            "sanitary_event_id": str(uuid.uuid4()),
+            "sanitary_event_type": event_type,
+            "severity": SEVERITY_MAP[event_type][0],
+            "severity_internal": SEVERITY_MAP[event_type][1],
+            "zone_id": zone_id,
+            "decision_mode": "decision_pending"
+        }
+
+        return sanitary_event
 
     def _parse_bbox(self, bbox):
         try:
@@ -72,6 +91,7 @@ class UniformBehaviorRules(threading.Thread):
 
     def _detect_no_cap(self, pkt):
         cam_id = pkt.get("cam_id", "default")
+        zone_id = pkt.get("zone_id", "")
         facts = pkt["facts"]
 
         person = self._get_fact_by_object_class(facts, "person")
@@ -95,12 +115,12 @@ class UniformBehaviorRules(threading.Thread):
                 self._no_cap_detected_timestamp[cam_id] = time.time()
 
         if self._is_no_cap_detected.get(cam_id, False) and time.time() - self._no_cap_detected_timestamp.get(cam_id, 0) > self._T_uniform_confirm_sec:
-            self._generate_sanitary_event(event_type="no_cap")
+            self._generate_sanitary_event(event_type="no_cap", zone_id=zone_id)
             self._is_no_cap_detected[cam_id] = False
-            print("VIOLATION")
 
     def _detect_no_gloves(self, pkt):
         cam_id = pkt.get("cam_id", "default")
+        zone_id = pkt.get("zone_id", "")
         facts = pkt["facts"]
 
         person = self._get_fact_by_object_class(facts, "person")
@@ -124,12 +144,12 @@ class UniformBehaviorRules(threading.Thread):
                 self._no_glove_detected_timestamp[cam_id] = time.time()
 
         if self._is_no_glove_detected.get(cam_id, False) and time.time() - self._no_glove_detected_timestamp.get(cam_id, 0) > self._T_uniform_confirm_sec:
-            self._generate_sanitary_event(event_type="no_glove")
+            self._generate_sanitary_event(event_type="no_glove", zone_id=zone_id)
             self._is_no_glove_detected[cam_id] = False
-            print("VIOLATION")
 
     def _detect_no_apron(self, pkt):
         cam_id = pkt.get("cam_id", "default")
+        zone_id = pkt.get("zone_id", "")
         facts = pkt["facts"]
 
         person = self._get_fact_by_object_class(facts, "person")
@@ -153,19 +173,12 @@ class UniformBehaviorRules(threading.Thread):
                 self._no_apron_detected_timestamp[cam_id] = time.time()
 
         if self._is_no_apron_detected.get(cam_id, False) and time.time() - self._no_apron_detected_timestamp.get(cam_id, 0) > self._T_uniform_confirm_sec:
-            self._generate_sanitary_event(event_type="no_apron")
+            self._generate_sanitary_event(event_type="no_apron", zone_id=zone_id)
             self._is_no_apron_detected[cam_id] = False
-            print("VIOLATION")
-
-    def _calculate_bbox_center(self, bbox):
-        x1, y1, x2, y2 = bbox
-        return (x1 + x2) / 2.0, (y1 + y2) / 2.0
-
-    def _calculate_distance(self, p1, p2):
-        return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
 
     def _detect_phone_usage(self, pkt):
-        cam_id = pkt.get("cam_id", "default")
+        cam_id = pkt.get("cam_id", "")
+        zone_id = pkt.get("zone_id", "")
         facts = pkt["facts"]
 
         person = self._get_fact_by_object_class(facts, "person")
@@ -191,9 +204,15 @@ class UniformBehaviorRules(threading.Thread):
             self._is_phone_usage_detected[cam_id] = False
 
         if self._is_phone_usage_detected.get(cam_id, False) and time.time() - self._phone_usage_timestamp.get(cam_id, 0) > self._T_uniform_confirm_sec:
-            self._generate_sanitary_event(event_type="phone_usage")
+            self._generate_sanitary_event(event_type="phone_usage", zone_id=zone_id)
             self._is_phone_usage_detected[cam_id] = False
-            print("VIOLATION")
+
+    def _calculate_bbox_center(self, bbox):
+        x1, y1, x2, y2 = bbox
+        return (x1 + x2) / 2.0, (y1 + y2) / 2.0
+
+    def _calculate_distance(self, p1, p2):
+        return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
 
     def _detect_face_touch(self, pkt):
         pass
