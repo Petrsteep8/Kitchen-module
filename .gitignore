@@ -6,6 +6,5 @@ openrc.sh
 **/faces_db*.npz
 
 __pycache__/
+kitchen_gateway/__pycache__/
 *.pyc
-
-test.py
