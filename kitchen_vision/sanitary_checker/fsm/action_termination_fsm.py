@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any
 ACTION_TERMINATION_STATES = {
     "action_active": "action_active",
     "action_ended_tracking_lost": "action_ended_tracking_lost",
-    "ACTION_ENDED_LEFT_ZONE": "ACTION_ENDED_LEFT_ZONE",
+    "action_ended_left_zone": "action_ended_left_zone",
     "action_ended_key_object_lost": "action_ended_key_object_lost",
     "action_ended_motion_stopped": "action_ended_motion_stopped",
 }
@@ -24,7 +24,7 @@ class ActionTerminationFSM:
     Таблица переходов:
     current_state | event | condition | next_state
     action_active | ACTION_END(tracking_lost) | — | action_ended_tracking_lost
-    action_active | ACTION_END(left_zone) | outside zone ≥ T_left_confirm_sec и не tracking_lost | ACTION_ENDED_LEFT_ZONE
+    action_active | ACTION_END(left_zone) | outside zone ≥ T_left_confirm_sec и не tracking_lost | action_ended_left_zone
     action_active | ACTION_END(key_object_lost) | — | action_ended_key_object_lost
     action_active | ACTION_END(motion_stopped) | — | action_ended_motion_stopped
     """
@@ -87,7 +87,7 @@ class ActionTerminationFSM:
             new_state = self._states["action_ended_tracking_lost"]
         elif event == self._events["left_zone"]:
             # В action_detector уже проверено условие (outside zone ≥ T_left_confirm_sec)
-            new_state = self._states["ACTION_ENDED_LEFT_ZONE"]
+            new_state = self._states["action_ended_left_zone"]
         elif event == self._events["key_object_lost"]:
             new_state = self._states["action_ended_key_object_lost"]
         elif event == self._events["motion_stopped"]:
@@ -136,4 +136,4 @@ if __name__ == "__main__":
     action_id2 = "action_456"
     fsm.start_action(action_id2)
     fsm.process_event(action_id2, ACTION_TERMINATION_EVENTS["left_zone"])
-    print(f"Action 2 after left_zone: {fsm.get_state(action_id2)}")  # ACTION_ENDED_LEFT_ZONE
+    print(f"Action 2 after left_zone: {fsm.get_state(action_id2)}")  # action_ended_left_zone
