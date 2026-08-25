@@ -6,9 +6,12 @@ import logging
 import threading
 from collections import defaultdict, deque
 from typing import Dict, List, Tuple, Optional, Any
-from kitchen_vision.pattern_analyzer import MotionPatternAnalyzer
-from kitchen_gateway.action_card_cache import ActionCardCache
-from kitchen_gateway.dbi_client import DBIClient
+try:
+    from kitchen_vision.pattern_analyzer import MotionPatternAnalyzer
+    from kitchen_gateway.action_card_cache import ActionCardCache
+    from kitchen_gateway.dbi_client import DBIClient
+except ModuleNotFoundError:
+    pass
 
 
 logging.basicConfig(level=logging.INFO)
@@ -91,7 +94,6 @@ class ActionDetector(threading.Thread):
         while not self.stop_event.is_set():
             try:
                 pkt = self.in_queue.get(timeout=0.25)
-                print("Packet: in action detector")
             except queue.Empty:
                 self.__check_timeouts_without_packets()
                 continue
@@ -105,7 +107,7 @@ class ActionDetector(threading.Thread):
                 if frame is None:
                     frame = pkt.get("frame")
                 if frame is None:
-                    frame = pkt.get("frame_bgr")  # [cite: 10]
+                    frame = pkt.get("frame_bgr")
 
                 if self.action_possible_on_cam(camera_id):
                     cam_data = self.analyze_motion(pkt)
@@ -367,13 +369,7 @@ class ActionDetector(threading.Thread):
                             self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}_timestamp_start"] = time.time()
                         if self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}"] >= 4 \
                                 and time.time() - self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}_timestamp_start"] <= 60:
-                            data_quality_event = {
-                                "event_type": "DATA_QUALITY_EVENT",
-                                "data_quality_event_id": uuid.uuid4(),
-                                "reason": "action_card_not_found",
-                                "observation_state": "OBS_OK"
-                            }
-                            print("DATA_QUALITY_EVENT: ", data_quality_event)
+                            self.make_data_quality_packet(pkt=pkt, reason="action_card_not_found")
                             self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}"] = 0
                         return None
 
@@ -556,7 +552,6 @@ class ActionDetector(threading.Thread):
         objects = self.__filter_objects(self.extract_normalized_objects(pkt))
 
         employee_obj = self.__get_action_employee_object(camera_id, objects)
-        employee_confidence = 0.0
         if employee_obj is not None:
             if employee_obj.get("face_score") is not None:
                 employee_confidence = float(employee_obj["face_score"])
@@ -576,31 +571,32 @@ class ActionDetector(threading.Thread):
             target_classes={"food"}
         )
 
+        carrying_type = "none"
+        if carrying_tool:
+            carrying_type = "tool"
+        if carrying_food:
+            carrying_type = "food"
+
         packet = {
-            "event_type": "ACTION_END",
             "action_id": d["action_id"],
-            "employee_id": d.get("employee_id"),
+            "employee_id": d.get("employee_id", None),
+            "action_type": d["action_type"],
             "camera_id": camera_id,
             "zone_id": camera_id,
-            "action_type": d["action_type"],
-            "timestamp_start": d["timestamp_start"],
-            "timestamp_end": d["timestamp_end"],
-            "hygiene": d.get("hygiene"),
             "end_reason": end_reason,
             "employee_confidence": max(0.0, min(1.0, employee_confidence)),
-            "carrying_tool": carrying_tool,
-            "carrying_food": carrying_food,
-            "objects": pkt.get("objects", []),  # [cite: 9]
-            "motion_patterns": pkt.get("motion_patterns", {}),
+            "carrying_type": carrying_type,
+            "carrying_confidence": max(0.0, min(1.0, employee_confidence))
         }
 
-        # Прокидываем новые данные в выходные события[cite: 10]
-        if "facts" in pkt:
-            packet["facts"] = pkt["facts"]
-        if "identities" in pkt:
-            packet["identities"] = pkt["identities"]
-
         return packet
+
+    def make_data_quality_packet(self, pkt: Dict, reason: str) -> Dict[str, Any]:
+        return {
+            "action_id": str(uuid.uuid4()),
+            "reason": reason,
+            "observation_state": "obs_ok"
+        }
 
     def __finish_action(self, camera_id: str, end_reason: str, pkt: Dict) -> Dict[str, Any]:
         state = self.__detected_actions[camera_id]
