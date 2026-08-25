@@ -11,12 +11,13 @@ try:
     from kitchen_vision.sanitary_checker.resert_logic.reset_logic import ResetLogic
     from kitchen_vision.sanitary_checker.ttl_logic.ttl_logic import TTLLogic
     from kitchen_vision.sanitary_checker.context_transition_engine.decision_table import DecisionTable
+    from kitchen_vision.sanitary_checker.context_transition_engine.contamination_table import ContaminationTable
+    from kitchen_vision.sanitary_checker.context_transition_engine.context_transfer_table import ContextTransferTable
 except ImportError:
     pass
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("event_pipeline")
-
 
 ENTITY_TYPES = {
     "employee": "employee",
@@ -201,15 +202,13 @@ class EventPipeline(threading.Thread):
         self._carry_types = CARRY_TYPES
         self._hygiene_attributes = HYGIENE_ATTRIBUTES
 
-        try:
-            self._fsm_hub = FSMHub()
-            self._reset_logic = ResetLogic(fsm_hub=self._fsm_hub) or None
-            self._ttl_logic = TTLLogic(fsm_hub=self._fsm_hub) or None
-            self._decision_table = DecisionTable(fsm_hub=self._fsm_hub) or None
-        except NameError:
-            self._fsm_hub = None
-            self._reset_logic = None
-            self._ttl_logic = None
+        self._fsm_hub = FSMHub()
+        self._reset_logic = ResetLogic(fsm_hub=self._fsm_hub) or None
+        self._ttl_logic = TTLLogic(fsm_hub=self._fsm_hub) or None
+        self._context_transfer_table = ContextTransferTable(fsm_hub=self._fsm_hub) or None
+        self._contamination_table = ContaminationTable() or None
+        self._decision_table = DecisionTable(context_transfer_table=self._context_transfer_table,
+                                             contamination_table=self._contamination_table) or None
 
     def run(self):
         while not self.stop_event.is_set():
@@ -241,17 +240,19 @@ class EventPipeline(threading.Thread):
                 return str(event.get("track_id"))
 
             elif event_type in (self._event_types["zone_enter"], self._event_types["zone_exit"]):
-                return str(event.get("track_id"))
+                return str(event.get("zone_id"))
 
             elif event_type == self._event_types["interaction"]:
-                return str(event.get("target_entity_id"))
+                return str(event.get("actor_entity_id"))
 
             elif event_type in (self._event_types["action_start"], self._event_types["action_end"]):
                 return str(event.get("action_id"))
 
             elif event_type == self._event_types["reset_event"]:
-                # Для reset_event entity_id берется из zone_id (раздел 25.9) #TODO
-                return str(event.get("zone_id"))
+                target_entities = event.get("target_entities")
+                if len(target_entities) > 0:
+                    return str(target_entities[0].get("entity_id"))
+                return str(uuid.uuid4())
 
             elif event_type == self._event_types["contamination_event"]:
                 return str(event.get("track_id"))
@@ -289,7 +290,7 @@ class EventPipeline(threading.Thread):
                 return "system"
 
             elif event_type in (self._event_types["zone_enter"], self._event_types["zone_exit"]):
-                return "system"
+                return "employee"
 
             elif event_type == self._event_types["interaction"]:
                 target_type = event.get("target_entity_type")
@@ -303,7 +304,7 @@ class EventPipeline(threading.Thread):
             elif event_type == self._event_types["reset_event"]:
                 # entity_type - список типов сущностей из target_entities
                 target_entities = event.get("target_entities", [])
-                if isinstance(target_entities, list) and target_entities:
+                if isinstance(target_entities, list) and len(target_entities) > 0 and target_entities:
                     # Возвращаем первый тип как основной, все типы сохраняются в payload
                     first_type = target_entities[0]
                     return first_type if first_type in self._entity_types else "system"
@@ -633,6 +634,65 @@ class EventPipeline(threading.Thread):
 
         return normalized_event
 
+    def _get_fsm(self, entity_type: str):
+        """Получение FSM для сущности"""
+        if entity_type == "employee":
+            return self._fsm_hub.employee_context
+        elif entity_type == "hands":
+            return self._fsm_hub.hands_context
+        elif entity_type == "tool":
+            return self._fsm_hub.tool_context
+        elif entity_type == "container":
+            return self._fsm_hub.container_context
+        elif entity_type == "surface":
+            return self._fsm_hub.surface_context
+        elif entity_type == "zone":
+            return self._fsm_hub.zone_context
+        elif entity_type == "food":
+            return None
+        elif entity_type == "obs":
+            return self._fsm_hub.observation_fsm
+        return None
+
+    def _get_data_for_fsm_transition(self, normalized_event: Optional[Dict[str, Any]]):
+        event_type = normalized_event.get("event_type")
+        payload = normalized_event.get("payload")
+        target_entities = []
+        event_details = None
+
+        if event_type == self._event_types["zone_enter"]:
+            target_entities.append({"employee": normalized_event.get("employee_id")})
+            event_details = payload.get("zone_type")
+        elif event_type == self._event_types["zone_exit"]:
+            target_entities.append({"employee": normalized_event.get("employee_id")})
+        elif event_type == self._event_types["interaction"]:
+            target_entities.append({payload.get("target_entity_type"): payload.get("target_entity_id")})
+            event_details = payload.get("actor_entity_type")
+        elif event_type == self._event_types["action_start"]:
+            pass
+        elif event_type == self._event_types["action_end"]:
+            event_details = payload.get("end_reason")
+        elif event_type == self._event_types["reset_event"]:
+            target_entities = payload.get("target_entities")
+            event_details = payload.get("reset_type")
+        elif event_type == self._event_types["contamination_event"]:
+            target_entities.append({payload.get("target_entity"): payload.get("target_entity_id")})
+            event_details = payload.get("contamination_type")
+        elif event_type == self._event_types["obs_event"]:
+            event_details = payload.get("state")
+        elif event_type == self._event_types["data_quality_event"]:
+            event_details = payload.get("reason")
+        elif event_type == self._event_types["process_event"]:
+            event_details = payload.get("process_event_type")
+        elif event_type == self._event_types["sanitize_event"]:
+            event_details = payload.get("sanitary_event_type")
+
+        return {
+            "event": event_type,
+            "event_details": event_details,
+            "target_entities": target_entities,
+        }
+
     def process_event(self, pkt: Dict, event_type: str, camera_id: str) -> None:
         """
         Обработка события через конвейер
@@ -653,30 +713,60 @@ class EventPipeline(threading.Thread):
 
         print(json.dumps(normalized_event, indent=4))
 
+        event_data_for_fsm_transition = []
         # Шаг 2: APPLY_EVENT_EFFECT -> context_transition_engine
         if event_type in (self._event_types["interaction"], self._event_types["contamination_event"]):
             if self._decision_table is not None:
-                generated_sanitary_events = self._decision_table.process_event(
+                result, generated_sanitary_events = self._decision_table.process_event(
                     normalized_event=normalized_event,
                     camera_id=camera_id,
                 )
-                for sanitary_event in generated_sanitary_events:
-                    print(f"Generated SANITARY_EVENT: {sanitary_event}")
-            print("Apply event effects -> context_transition_engine")
+
+                if result:
+                    event_data_for_fsm_transition.append(
+                        self._get_data_for_fsm_transition(normalized_event=normalized_event))
+
+                try:
+                    for sanitary_event in generated_sanitary_events:
+                        self._input_queue.put(sanitary_event)
+                except Exception as e:
+                    logger.warning("Unable to process event due to %s", e)
 
         reset_result_for_ttl = []
         # Шаг 3: APPLY_RESET -> reset_logic
         if event_type == self._event_types["reset_event"]:
             if self._reset_logic is not None:
-                reset_result_for_ttl = self._reset_logic.process_reset_event(pkt=normalized_event)
+                result, reset_result_for_ttl = self._reset_logic.process_reset_event(pkt=normalized_event)
+                if result:
+                    event_data_for_fsm_transition.append(
+                        self._get_data_for_fsm_transition(normalized_event=normalized_event))
 
         # Шаг 4: APPLY_TTL -> ttl_logic
-        if event_type not in (self._event_types["obs_event"], self._event_types["data_quality_event"]):
+        if event_type not in (self._event_types["obs_event"], self._event_types["data_quality_event"],
+                              self._event_types["process_event"], self._event_types["sanitize_event"]):
             if self._ttl_logic is not None:
                 self._ttl_logic.process_ttl_event(
                     pkt=normalized_event,
                     reset_result_for_ttl=reset_result_for_ttl
                 )
+
+        # Шаг 5: APPLY_OBS -> observation_fsm
+        fsm = self._get_fsm(entity_type="obs")
+        if fsm is None:
+            logger.warning("No FSM, skipping...")
+        if hasattr(fsm, "get_obs_state"):
+            obs_state = fsm.get_obs_state(camera_id=camera_id)
+            if obs_state == self._observation_states["obs_lost"]:
+                # TODO подумать
+                pass
+
+        # Шаг 6: APPLY_FSM_TRANSITION -> fsm
+        if len(event_data_for_fsm_transition) == 0:
+            # TODO реализовать выбор приоритета + fsm transition
+            logger.info("No event data for fsm transition, skipping...")
+
+        # Шаг 7: DECISION -> decisionFSM
+        # TODO подтверждение/отклонение события
 
     def stop(self) -> None:
         self.stop_event.set()
