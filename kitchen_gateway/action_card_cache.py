@@ -9,7 +9,7 @@ class ActionCardCache:
     def __init__(self):
         self._storage = {}
         self._session = requests.Session()
-        self._base_url = "http://localhost:8000/api/internal/action-cards/"
+        self._base_url = "https://localhost:8000/api/internal/action-cards/"
         self._restaurant_id = 2
 
         self.get_action_cards_from_dbi()
