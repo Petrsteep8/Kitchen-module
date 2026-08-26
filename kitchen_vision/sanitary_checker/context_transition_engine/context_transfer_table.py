@@ -171,17 +171,6 @@ class ContextTransferTable:
         # Fallback: из локального хранилища
         return self._entity_contexts.get(entity_id, {}).get(entity_type)
 
-    def _set_context(self, entity_type: str, entity_id: str, context: str) -> None:
-        """Установка контекста сущности в FSM"""
-        fsm = self._get_fsm(entity_type)
-        if fsm and hasattr(fsm, 'set_context'):
-            fsm.set_context(track_id=entity_id, new_context=context)
-        else:
-            # Fallback: локальное хранилище
-            if entity_id not in self._entity_contexts:
-                self._entity_contexts[entity_id] = {}
-            self._entity_contexts[entity_id][entity_type] = context
-
     def _apply_transfer_rules(
         self,
         source_entity: str,
@@ -291,15 +280,5 @@ class ContextTransferTable:
         )
         if violation:
             violations.append(violation)
-
-        # Применяем новый контекст к целевой сущности
-        if final_new_context != target_current_context:
-            self._set_context(target_entity, target_entity_id, final_new_context)
-            logger.debug(
-                f"Context transferred: {target_entity}:{target_entity_id} "
-                f"{target_current_context} -> {final_new_context} (via {source_entity}:{source_entity_id})"
-            )
-        else:
-            logger.debug(f"No context change for {target_entity}:{target_entity_id}")
 
         return True, violations
