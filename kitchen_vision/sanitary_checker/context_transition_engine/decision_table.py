@@ -45,15 +45,11 @@ class DecisionTable:
 
     def __init__(
         self,
-        fsm_hub: FSMHub,
         context_transfer_table: ContextTransferTable,
         contamination_table: ContaminationTable,
-        config: Optional[Dict[str, Any]] = None,
     ):
-        self._fsm_hub = fsm_hub
         self._context_transfer_table = context_transfer_table
         self._contamination_table = contamination_table
-        self._config = config or {}
 
         self._event_types = EVENT_TYPES
         self._severity_internal = SEVERITY_INTERNAL
@@ -134,10 +130,26 @@ class DecisionTable:
             "severity_internal": severity_internal,
             "escalation_category": None,
             "incompatibility_cause": violation.incompatibility_cause,
-            "rule_id": violation.rule_id,
+            "rule_id": None,
             "zone_id": payload.get("zone_id"),
             "employee_id": target_entity_id if target_entity_type == "employee" else None,
             "decision_mode": "SANITARY_VIOLATION_CONFIRMED",
         }
 
-        return sanitary_event
+        return {
+            "event_id": str(uuid.uuid4()),
+            "timestamp": timestamp,
+            "event_type": "sanitary_event",
+            "camera_id": camera_id,
+            "entity_id": target_entity_id,
+            "entity_type": target_entity_type,
+            "confidence": normalized_event.get("confidence", 1.0),
+            "time_source": normalized_event.get("time_source", "server_ntp"),
+            "late": normalized_event.get("late", False),
+            "track_lineage_id": normalized_event.get("track_lineage_id"),
+            "executor_attribution": normalized_event.get("executor_attribution"),
+            "rules_config_version": normalized_event.get("rules_config_version"),
+            "model_versions": normalized_event.get("model_versions"),
+            "decision_trace": normalized_event.get("decision_trace"),
+            "payload": sanitary_event,
+        }
