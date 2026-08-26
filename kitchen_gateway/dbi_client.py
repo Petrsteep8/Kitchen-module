@@ -6,8 +6,12 @@ import ast
 import time
 import requests
 from typing import *
-from kitchen_gateway.db_queue.db_queue import DBQueue
-from kitchen_gateway.pydantic_models.pydantic_models import *
+
+try:
+    from kitchen_gateway.db_queue.db_queue import DBQueue
+    from kitchen_gateway.pydantic_models.pydantic_models import *
+except ImportError as e:
+    pass
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("dbi_client_integrated")
