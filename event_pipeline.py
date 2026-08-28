@@ -262,7 +262,10 @@ class EventPipeline(threading.Thread):
             return self._fsm_hub.observation_fsm
         return None
 
-    def get_data_for_fsm_transition(self, normalized_event: Optional[Dict[str, Any]]):
+    def get_data_for_fsm_transition(self,
+                                    normalized_event: Optional[Dict[str, Any]],
+                                    sanitary_events: List[Dict[str, Any]] = None
+        ):
         event_type = normalized_event.get("event_type")
         payload = normalized_event.get("payload")
         target_entities = []
@@ -281,7 +284,8 @@ class EventPipeline(threading.Thread):
                 payload.get("target_entity_type"): payload.get("target_entity_id")
             })
             event_details = payload.get("actor_entity_type")
-            source_context = normalized_event.get("source_context")
+            if sanitary_events and len(sanitary_events) > 0:
+                source_context = sanitary_events[0].get("source_context")
 
         elif event_type == self._event_types["action_start"]:
             pass
@@ -336,7 +340,10 @@ class EventPipeline(threading.Thread):
 
                 if result:
                     event_data_for_fsm_transition.append(
-                        self.get_data_for_fsm_transition(normalized_event=normalized_event)
+                        self.get_data_for_fsm_transition(
+                            normalized_event=normalized_event,
+                            sanitary_events=generated_sanitary_events
+                        )
                     )
 
                 try:
