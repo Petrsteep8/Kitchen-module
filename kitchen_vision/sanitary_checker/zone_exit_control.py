@@ -184,7 +184,22 @@ class ZoneExitControl(threading.Thread):
             logger.info(f"Data capture for camera: {camera_id} started due to zone exit")
             self._camera_capture_data[camera_id] = (True, action_pkt)
 
-    def _generate_sanitary_event(self, sanitary_event_type: str, zone_id: str):
+    def _create_zone_exit_event(
+            self,
+            zone_exit_event_type: str,
+            zone_id: str,
+            employee_id: Optional[str],
+            camera_id: str,
+            timestamp: int,
+            confidence: float,
+            track_lineage_id: Optional[str],
+            track_id: str = None,
+
+    ) -> Dict:
+
+        entity_id = employee_id if employee_id else track_id
+        entity_type = "employee" if employee_id else "system"  # или "system" для неизвестного
+
         sanitary_event = {
             "sanitary_event_id": str(uuid.uuid4()),
             "sanitary_event_type": sanitary_event_type,
