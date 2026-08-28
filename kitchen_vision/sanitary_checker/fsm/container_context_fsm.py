@@ -98,6 +98,7 @@ class ContainerContextFSM:
             track_id: str,
             event: str,
             event_type: Optional[str] = None,
+            source_context: str = None,
     ) -> None:
         if self.get_data_by_track_id(track_id) is None:
             return
@@ -106,7 +107,7 @@ class ContainerContextFSM:
 
         if (event == CONTAINER_EVENTS["interaction"] and event_type == "hands" and current_context in (
                 self._context["unknown"], self._context["neutral"])):
-            self.set_context(track_id, current_context)  # TODO add source context
+            self.set_context(track_id, source_context)
             return
 
         if (event == CONTAINER_EVENTS["contamination_event"] and
