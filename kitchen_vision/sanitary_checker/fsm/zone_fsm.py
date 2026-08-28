@@ -48,7 +48,7 @@ ZONE_SANITARY_STATES: Dict[str, str] = {
 class ZoneContextFSM:
     def __init__(self):
         self._data: Dict[str, Dict[str, Any]] = {}
-        self._event_detailss = ZONE_EVENTS
+        self._event_details = ZONE_EVENTS
         self._context = ZONE_CONTEXTS
         self._sanitary_states = ZONE_SANITARY_STATES
 
