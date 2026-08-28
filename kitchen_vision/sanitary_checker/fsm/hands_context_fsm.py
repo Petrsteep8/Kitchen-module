@@ -138,12 +138,14 @@ class HandsContextFSM:
             return
 
         if event == HANDS_EVENTS["ttl_expired"]:
-            self.set_context(track_id, self._context["unknown"])
+            self.set_context(track_id, event_details)
+            self.set_sanitary_state(track_id, event_details)
             return
 
         if (event == HANDS_EVENTS["obs_event"] and
                 event_details == self._context["obs_lost"]):
             self.set_context(track_id, self._context["unknown"])
+            self.set_sanitary_state(track_id, self._sanitary_states["unknown"])
             return
 
     def add_data_by_track_id(self, track_id: str, data: Dict[str, Any]) -> None:

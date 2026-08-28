@@ -97,7 +97,7 @@ class ContainerContextFSM:
             self,
             track_id: str,
             event: str,
-            event_type: Optional[str] = None,
+            event_details: Optional[str] = None,
             source_context: str = None,
     ) -> None:
         if self.get_data_by_track_id(track_id) is None:
@@ -105,31 +105,31 @@ class ContainerContextFSM:
 
         current_context = self._get_current_context(track_id)
 
-        if (event == CONTAINER_EVENTS["interaction"] and event_type == "hands" and current_context in (
+        if (event == CONTAINER_EVENTS["interaction"] and event_details == "hands" and current_context in (
                 self._context["unknown"], self._context["neutral"])):
             self.set_context(track_id, source_context)
             return
 
         if (event == CONTAINER_EVENTS["contamination_event"] and
-                event_type in ["raw_food", "waste", "dirty_surface"] and current_context in (
+                event_details in ["raw_food", "waste", "dirty_surface"] and current_context in (
                         self._context["unknown"], self._context["neutral"])):
-            self.set_context(track_id, event_type)
+            self.set_context(track_id, event_details)
             self.set_sanitary_state(track_id, self._sanitary_states["contaminated"])
             return
 
-        if event == CONTAINER_EVENTS["reset_event"] and event_type in ["container_replaced_clean",
+        if event == CONTAINER_EVENTS["reset_event"] and event_details in ["container_replaced_clean",
                                                                        "disposable_container_used"]:
             self.set_context(track_id, self._context["sanitized"])
             self.set_sanitary_state(track_id, self._sanitary_states["clean_confirmed"])
             return
 
         if event == CONTAINER_EVENTS["ttl_expired"]:
-            self.set_context(track_id, self._context["unknown"])
-            self.set_sanitary_state(track_id, self._sanitary_states["unknown"])
+            self.set_context(track_id, event_details)
+            self.set_sanitary_state(track_id, event_details)
             return
 
         if (event == CONTAINER_EVENTS["obs_event"] and
-                event_type == self._context["obs_lost"]):
+                event_details == self._context["obs_lost"]):
             self.set_context(track_id, self._context["unknown"])
             self.set_sanitary_state(track_id, self._sanitary_states["unknown"])
             return

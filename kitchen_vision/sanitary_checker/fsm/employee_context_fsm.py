@@ -188,8 +188,8 @@ class EmployeeContextFSM:
                 return
 
         if event == EMPLOYEE_EVENTS["ttl_expired"]:
-            self.set_context(track_id, self._context["unknown"])
-            self.set_sanitary_state(track_id, self._sanitary_states["unknown"])
+            self.set_context(track_id, event_details)
+            self.set_sanitary_state(track_id, event_details)
             return
 
         if (event == EMPLOYEE_EVENTS["obs_event"] and
