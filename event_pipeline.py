@@ -128,6 +128,7 @@ EVENT_TYPES = {
     "sanitary_event": "sanitary_event",
     "process_event": "process_event",
     "incident": "incident",
+    "ttl_expired": "ttl_expired",
 }
 
 DECISION_MODES = {
@@ -177,6 +178,13 @@ SEVERITY_MAPPING = {
     "info": "info",
 }
 
+EVENTS_WITH_NO_TTL = [
+    "obs_event",
+    "data_quality_event",
+    "sanitary_event",
+    "process_event",
+]
+
 
 class EventPipeline(threading.Thread):
     def __init__(self, input_queue: queue.Queue):
@@ -201,6 +209,7 @@ class EventPipeline(threading.Thread):
         self._escalation_categories = ESCALATION_CATEGORIES
         self._carry_types = CARRY_TYPES
         self._hygiene_attributes = HYGIENE_ATTRIBUTES
+        self._events_with_no_ttl = EVENTS_WITH_NO_TTL
 
         self._fsm_hub = FSMHub()
         self._reset_logic = ResetLogic(fsm_hub=self._fsm_hub)
@@ -271,13 +280,20 @@ class EventPipeline(threading.Thread):
         target_entities = []
         event_details = None
         source_context = None
+        priority = 0
+
+        if event_type == self._event_types["ttl_expired"]:
+            event_details = payload["next_state"]
+            priority = 6
 
         if event_type == self._event_types["zone_enter"]:
             target_entities.append({"employee": payload.get("employee_id")})
             event_details = payload.get("zone_type")
+            priority = 4
 
         elif event_type == self._event_types["zone_exit"]:
             target_entities.append({"employee": payload.get("employee_id")})
+            priority = 4
 
         elif event_type == self._event_types["interaction"]:
             target_entities.append({
@@ -286,39 +302,102 @@ class EventPipeline(threading.Thread):
             event_details = payload.get("actor_entity_type")
             if sanitary_events and len(sanitary_events) > 0:
                 source_context = sanitary_events[0].get("source_context")
+            priority = 3
 
         elif event_type == self._event_types["action_start"]:
-            pass
+            priority = 10
 
         elif event_type == self._event_types["action_end"]:
             event_details = payload.get("end_reason")
+            priority = 10
 
         elif event_type == self._event_types["reset_event"]:
             target_entities = payload.get("target_entities")
             event_details = payload.get("reset_type")
+            priority = 0
 
         elif event_type == self._event_types["contamination_event"]:
             target_entities.append({payload.get("target_entity"): payload.get("target_entity_id")})
             event_details = payload.get("contamination_type")
 
+            if payload.get("priority") == "high":
+                priority = 1
+            else:
+                priority = 5
+
         elif event_type == self._event_types["obs_event"]:
             event_details = payload.get("state")
+            if event_details == "obs_lost":
+                priority = 7
+            else:
+                priority = 10
 
         elif event_type == self._event_types["data_quality_event"]:
             event_details = payload.get("reason")
+            priority = 10
 
         elif event_type == self._event_types["process_event"]:
             event_details = payload.get("process_event_type")
+            priority = 10
 
         elif event_type == self._event_types["sanitary_event"]:
             event_details = payload.get("sanitary_event_type")
+            priority = 10
 
         return {
-            "event": event_type,
+            "event_type": event_type,
             "event_details": event_details,
             "target_entities": target_entities,
             "source_context": source_context,
+            "priority": priority,
         }
+
+    def choose_event_by_priority(self, event_data_for_fsm_transition: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if len(event_data_for_fsm_transition) > 0:
+            lst.sort(key=lambda event: event["priority"])
+
+        return lst[0]
+
+    def choose_fsm_transition(self, event_data_for_fsm_transition):
+        target_entities = event_data_for_fsm_transition.get("target_entities")
+        event_type = event_data_for_fsm_transition.get("event_type")
+        event_details = event_data_for_fsm_transition.get("event_details")
+
+        for target_entity in target_entities:
+            for key, value in target_entity.items():
+                print(f"{key}: {value}")
+
+                if key == self._entity_types["employee"]:
+                    fsm = self._get_fsm(entity_type=self._entity_types["employee"])
+                    if fsm and hasattr(fsm, "process_event"):
+                        fsm.process_event(event=event_type, event_details=event_details, track_id=value)
+
+                elif key == self._entity_types["hands"]:
+                    fsm = self._get_fsm(entity_type=self._entity_types["hands"])
+                    if fsm and hasattr(fsm, "process_event"):
+                        fsm.process_event(event=event_type, event_details=event_details, track_id=value)
+
+                elif key == self._entity_types["tool"]:
+                    fsm = self._get_fsm(entity_type=self._entity_types["tool"])
+                    if fsm and hasattr(fsm, "process_event"):
+                        fsm.process_event(event=event_type, event_details=event_details, track_id=value)
+
+                elif key == self._entity_types["container"]:
+                    source_context = event_data_for_fsm_transition.get("source_context")
+                    fsm = self._get_fsm(entity_type=self._entity_types["container"])
+                    if fsm and hasattr(fsm, "process_event"):
+                        fsm.process_event(event=event_type, event_details=event_details, track_id=value, source_context=source_context)
+
+                elif key == self._entity_types["surface"]:
+                    source_context = event_data_for_fsm_transition.get("source_context")
+                    fsm = self._get_fsm(entity_type=self._entity_types["surface"])
+                    if fsm and hasattr(fsm, "process_event"):
+                        fsm.process_event(event=event_type, event_details=event_details, track_id=value, source_context=source_context)
+
+                elif key == self._entity_types["zone"]:
+                    fsm = self._get_fsm(entity_type=self._entity_types["zone"])
+                    if fsm and hasattr(fsm, "process_event"):
+                        fsm.process_event(event=event_type, event_details=event_details, track_id=value)
 
     def process_event(self, normalized_event: Dict) -> None:
         # Шаг 1: Валидация структуры входного события
@@ -352,6 +431,7 @@ class EventPipeline(threading.Thread):
                 except Exception as e:
                     logger.warning("Unable to process event due to %s", e)
 
+
         # Шаг 3: APPLY_RESET -> reset_logic
         reset_result_for_ttl = []
         if event_type == self._event_types["reset_event"]:
@@ -362,22 +442,29 @@ class EventPipeline(threading.Thread):
                         self.get_data_for_fsm_transition(normalized_event=normalized_event)
                     )
 
+
         # Шаг 4: APPLY_TTL -> ttl_logic
-        if event_type not in (self._event_types["obs_event"], self._event_types["data_quality_event"],
-                              self._event_types["process_event"], self._event_types["sanitize_event"]):
+        if event_type not in self._events_with_no_ttl:
             if self._ttl_logic is not None:
-                self._ttl_logic.process_ttl_event(
+                is_reset = True if len(reset_result_for_ttl) > 0 else False
+
+                generated_ttl_events = self._ttl_logic.process_ttl_event(
                     normalized_event=normalized_event,
-                    reset_result_for_ttl=reset_result_for_ttl
+                    reset_result_for_ttl=reset_result_for_ttl,
+                    is_reset=is_reset
                 )
 
-        # Шаг 6: APPLY_FSM_TRANSITION -> fsm
-        if len(event_data_for_fsm_transition) == 0:
-            # TODO реализовать выбор приоритета + fsm transition
-            logger.info("No event data for fsm transition, skipping...")
+                for ttl_event in generated_ttl_events:
+                    event_data_for_fsm_transition.append(
+                        self.get_data_for_fsm_transition(
+                            normalized_event=ttl_event
+                        )
+                    )
 
-        # Шаг 7: DECISION -> decisionFSM
-        # TODO подтверждение/отклонение события
+
+        # Шаг 6: APPLY_FSM_TRANSITION -> fsm
+        most_important_event = self.choose_event_by_priority(event_data_for_fsm_transition)
+        self.choose_fsm_transition(event_data_for_fsm_transition=most_important_event)
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -397,5 +484,24 @@ if __name__ == "__main__":
 
     from utils.test_data import *
 
+    lst = []
+    r = event_pipeline.get_data_for_fsm_transition(normalized_event=zone_exit)
+    lst.append(r)
+    r = event_pipeline.get_data_for_fsm_transition(normalized_event=contamination_event)
+    lst.append(r)
     r = event_pipeline.get_data_for_fsm_transition(normalized_event=interaction)
-    print(r)
+    lst.append(r)
+    r = event_pipeline.get_data_for_fsm_transition(normalized_event=process_event_food_handoff)
+    lst.append(r)
+    r = event_pipeline.get_data_for_fsm_transition(normalized_event=reset_event)
+    lst.append(r)
+    r = event_pipeline.get_data_for_fsm_transition(normalized_event=zone_enter)
+    lst.append(r)
+
+    for event in lst:
+        print(event)
+
+    a = event_pipeline.choose_event_by_priority(event_data_for_fsm_transition=lst)
+    print('\n', a)
+    event_pipeline.choose_fsm_transition(event_data_for_fsm_transition=a)
+
