@@ -48,7 +48,7 @@ TOOL_SANITARY_STATES: Dict[str, str] = {
 class ToolContextFSM:
     def __init__(self):
         self._data: Dict[str, Dict[str, Any]] = {}
-        self._event_detailss = TOOL_EVENTS
+        self._event_details = TOOL_EVENTS
         self._context = TOOL_CONTEXTS
         self._sanitary_states = TOOL_SANITARY_STATES
 
@@ -99,6 +99,9 @@ class ToolContextFSM:
             event: str,
             event_details: Optional[str] = None,
     ) -> None:
+        if self.get_data_by_track_id(track_id) is None:
+            return
+        
         current_context = self._get_current_context(track_id)
 
         if (event == TOOL_EVENTS["interaction"] and

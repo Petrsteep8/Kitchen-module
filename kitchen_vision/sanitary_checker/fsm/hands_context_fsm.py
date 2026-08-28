@@ -48,7 +48,7 @@ HANDS_SANITARY_STATES: Dict[str, str] = {
 class HandsContextFSM:
     def __init__(self):
         self._data: Dict[str, Dict[str, Any]] = {}
-        self._event_detailss = HANDS_EVENTS
+        self._event_details = HANDS_EVENTS
         self._context = HANDS_CONTEXTS
         self._sanitary_states = HANDS_SANITARY_STATES
 
@@ -99,6 +99,9 @@ class HandsContextFSM:
             event: str,
             event_details: Optional[str] = None,
     ) -> None:
+        if self.get_data_by_track_id(track_id) is None:
+            return
+        
         current_context = self._get_current_context(track_id)
 
         if (event == HANDS_EVENTS["interaction"] and

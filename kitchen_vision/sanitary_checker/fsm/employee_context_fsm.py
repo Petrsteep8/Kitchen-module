@@ -134,6 +134,9 @@ class EmployeeContextFSM:
             event: str,
             event_details: Optional[str] = None,
     ) -> None:
+        if self.get_data_by_track_id(track_id) is None:
+            return
+
         current_context = self._get_current_context(track_id)
 
         if (event == EMPLOYEE_EVENTS["context_observed_raw_animal"] and

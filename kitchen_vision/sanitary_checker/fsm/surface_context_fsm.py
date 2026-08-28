@@ -48,7 +48,7 @@ SURFACE_SANITARY_STATES: Dict[str, str] = {
 class SurfaceContextFSM:
     def __init__(self):
         self._data: Dict[str, Dict[str, Any]] = {}
-        self._event_detailss = SURFACE_EVENTS
+        self._event_details = SURFACE_EVENTS
         self._context = SURFACE_CONTEXTS
         self._sanitary_states = SURFACE_SANITARY_STATES
 
@@ -99,6 +99,9 @@ class SurfaceContextFSM:
             event: str,
             event_details: Optional[str] = None,
     ) -> None:
+        if self.get_data_by_track_id(track_id) is None:
+            return
+        
         current_context = self._get_current_context(track_id)
 
         if event == SURFACE_EVENTS["interaction"] and event_details == "hands" and current_context in (
