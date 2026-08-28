@@ -4,7 +4,7 @@ try:
     from kitchen_vision.sanitary_checker.fsm.tool_context_fsm import ToolContextFSM
     from kitchen_vision.sanitary_checker.fsm.container_context_fsm import ContainerContextFSM
     from kitchen_vision.sanitary_checker.fsm.surface_context_fsm import SurfaceContextFSM
-    from kitchen_vision.sanitary_checker.fsm.zone_context_fsm import ZoneFSM
+    from kitchen_vision.sanitary_checker.fsm.zone_fsm import ZoneContextFSM
     from kitchen_vision.sanitary_checker.fsm.observation_fsm import ObservationFSM
     from kitchen_vision.sanitary_checker.fsm.action_termination_fsm import ActionTerminationFSM
 except ImportError as e:
@@ -12,14 +12,14 @@ except ImportError as e:
 
 class FSMHub:
     def __init__(self):
-        self._employee_context_fsm = EmployeeContextFSM() or None
-        self._hands_context_fsm = HandsContextFSM() or None
-        self._tool_context_fsm = ToolContextFSM() or None
-        self._container_context_fsm = ContainerContextFSM() or None
-        self._surface_context_fsm = SurfaceContextFSM() or None
-        self._zone_context_fsm = ZoneFSM() or None
-        self._observation_fsm = ObservationFSM() or None
-        self._action_termination_fsm = ActionTerminationFSM() or None
+        self._employee_context_fsm = EmployeeContextFSM()
+        self._hands_context_fsm = HandsContextFSM()
+        self._tool_context_fsm = ToolContextFSM()
+        self._container_context_fsm = ContainerContextFSM()
+        self._surface_context_fsm = SurfaceContextFSM()
+        self._zone_context_fsm = ZoneContextFSM()
+        self._observation_fsm = ObservationFSM()
+        self._action_termination_fsm = ActionTerminationFSM()
 
     @property
     def employee_context(self):
