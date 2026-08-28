@@ -1,6 +1,7 @@
 import logging
 import time
 import uuid
+import copy
 from typing import Dict, Any
 from dataclasses import dataclass
 
@@ -69,26 +70,11 @@ class TTLLogic:
     def __init__(self, fsm_hub: FSMHub):
         self._fsm_hub = fsm_hub
 
-    def _get_sanitary_state(self, fsm, track_id: str):
-        if fsm is None:
-            return None
-        if hasattr(fsm, "get_sanitary_state"):
-            return fsm.get_sanitary_state(track_id=track_id)
-        return None
+        # Время последней проверки ttl для сущности
+        self._last_ttl_check: Dict[str, float] = {}
 
-    def _get_last_event_timestamp(self, fsm, track_id: str):
-        if fsm is None:
-            return None
-        if hasattr(fsm, "get_last_event_timestamp"):
-            return fsm.get_last_event_timestamp(track_id=track_id)
-        return None
-
-    def _get_ttl_remaining(self, fsm, track_id: str):
-        if fsm is None:
-            return None
-        if hasattr(fsm, "get_ttl_remaining"):
-            return fsm.get_ttl_remaining(track_id=track_id)
-        return None
+        # Оставшееся время жизни для сущности
+        self._entity_ttl: Dict[str, float] = {}
 
     def _validate_entity_type(self, entity_type: str):
         if entity_type not in ENTITY_WITH_TTL:
@@ -102,153 +88,192 @@ class TTLLogic:
             return False
         return True
 
-    def _set_new_entity_state(self, fsm, new_state: str, track_id: str):
-        if fsm is None:
-            return
-        if hasattr(fsm, "set_sanitary_state"):
-            fsm.set_sanitary_state(track_id=track_id, new_state=new_state)
+    def _set_ttl_remaining(self, track_id: str, new_ttl: float):
+        if self._entity_ttl.get(track_id):
+            self._entity_ttl[track_id] = new_ttl
 
-    def _set_new_entity_context(self, fsm, new_context: str, track_id: str):
-        if fsm is None:
-            return
-        if hasattr(fsm, "set_context"):
-            fsm.set_context(track_id=track_id, new_context=new_context)
+    def _update_ttl_remaining(self, track_id: str, additional_ttl: float):
+        if self._entity_ttl.get(track_id):
+            self._entity_ttl[track_id] += additional_ttl
 
-    def _set_ttl_remaining(self, fsm, track_id: str, new_ttl: int):
+    def _update_last_event_timestamp(self, track_id: str):
+        if self._last_ttl_check.get(track_id):
+            self._last_ttl_check[track_id] = time.time()
+
+    def _get_sanitary_state(self, fsm, track_id: str):
         if fsm is None:
             return None
-        if hasattr(fsm, "set_ttl_remaining"):
-            fsm.set_ttl_remaining(track_id=track_id, new_ttl=new_ttl)
+        if hasattr(fsm, "get_sanitary_state"):
+            return fsm.get_sanitary_state(track_id=track_id)
         return None
 
-    def _update_ttl_remaining(self, fsm, track_id: str, additional_ttl: int):
-        if fsm is None:
-            return None
-        if hasattr(fsm, "update_ttl_remaining"):
-            fsm.set_ttl_remaining(track_id=track_id, additional_ttl=additional_ttl)
-        return None
+    def _create_ttl_expired_event(self, normalized_event: Dict[str, Any], next_state: str):
+        ttl_expired_event = copy.deepcopy(normalized_event)
 
-    def _update_last_event_timestamp(self, fsm, track_id: str):
-        if fsm is None:
-            return
-        if hasattr(fsm, "update_last_event_timestamp"):
-            fsm.update_last_event_timestamp(track_id=track_id)
+        ttl_expired_event["event_id"] = uuid.uuid4()
+        ttl_expired_event["event_type"] = "ttl_expired"
+        ttl_expired_event["timestamp"] = time.time()
+        ttl_expired_event["payload"] = {
+            "next_state": next_state,
+        }
+
+        return ttl_expired_event
 
     def _process_normal_ttl_event(self, normalized_event: Dict[str, Any]):
         """Обработка TTL логики не reset-события"""
         entity_id = normalized_event.get("entity_id")
         entity_type = normalized_event.get("entity_type")
         if not self._validate_entity_type(entity_type=entity_type):
-            return
+            return []
 
         fsm = self._get_fsm_for_entity(entity_type=entity_type)
         if fsm is None:
-            logger.info(f"no FSM found for entity_type:{entity_type}")
-            return
+            logger.info(f"no FSM found for entity_type: {entity_type}")
+            return []
 
         sanitary_state = self._get_sanitary_state(fsm=fsm, track_id=entity_id)
-        ttl_remaining = self._get_ttl_remaining(fsm=fsm, track_id=entity_id)
-        last_event_timestamp = self._get_last_event_timestamp(fsm=fsm, track_id=entity_id)
         current_timestamp = time.time()
+
+        generated_events = []
         if sanitary_state == SANITARY_STATES.get("clean_confirmed"):
             # Получаем временной промежуток с момента последней проверки
-            time_gap = current_timestamp - last_event_timestamp
+            time_gap = current_timestamp - self._last_ttl_check[str(entity_id)]
             # Подсчет оставшегося времени, при котором сохраняется текущее состояние
-            new_ttl_remaining = ttl_remaining - time_gap
+            new_ttl_remaining = self._entity_ttl[str(entity_id)] - time_gap
 
             if entity_type == ENTITY_WITH_TTL.get("employee"):
                 # Если время истекло -> переход в состояние clean_degrading
                 if new_ttl_remaining <= 0:
-                    self._set_new_entity_state(fsm=fsm, new_state="clean_degrading", track_id=entity_id)
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                            new_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
+                    generated_events.append(
+                        self._create_ttl_expired_event(
+                            normalized_event=normalized_event,
+                            next_state="clean_degrading"
+                        )
+                    )
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
                 else:
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id, new_ttl=new_ttl_remaining)
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=new_ttl_remaining)
 
-            elif entity_type == ENTITY_WITH_TTL.get("hands"):
+            if entity_type == ENTITY_WITH_TTL.get("hands"):
                 if new_ttl_remaining <= 0:
-                    self._set_new_entity_state(fsm=fsm, new_state="clean_degrading", track_id=entity_id)
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                            new_ttl=ENTITY_TTL.get("ttl_hands_degrading_sec"))
+                    generated_events.append(
+                        self._create_ttl_expired_event(
+                            normalized_event=normalized_event,
+                            next_state="clean_degrading"
+                        )
+                    )
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_hands_degrading_sec"))
                 else:
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id, new_ttl=new_ttl_remaining)
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=new_ttl_remaining)
 
-            elif entity_type == ENTITY_WITH_TTL.get("tool"):
+            if entity_type == ENTITY_WITH_TTL.get("tool"):
                 if new_ttl_remaining <= 0:
-                    self._set_new_entity_state(fsm=fsm, new_state="clean_degrading", track_id=entity_id)
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                            new_ttl=ENTITY_TTL.get("ttl_tool_degrading_sec"))
+                    generated_events.append(
+                        self._create_ttl_expired_event(
+                            normalized_event=normalized_event,
+                            next_state="clean_degrading"
+                        )
+                    )
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_tool_degrading_sec"))
                 else:
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id, new_ttl=new_ttl_remaining)
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=new_ttl_remaining)
 
-            elif entity_type == ENTITY_WITH_TTL.get("container"):
+            if entity_type == ENTITY_WITH_TTL.get("container"):
                 if new_ttl_remaining <= 0:
-                    self._set_new_entity_state(fsm=fsm, new_state="clean_degrading", track_id=entity_id)
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                            new_ttl=ENTITY_TTL.get("ttl_container_degrading_sec"))
+                    generated_events.append(
+                        self._create_ttl_expired_event(
+                            normalized_event=normalized_event,
+                            next_state="clean_degrading"
+                        )
+                    )
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_container_degrading_sec"))
                 else:
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id, new_ttl=new_ttl_remaining)
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=new_ttl_remaining)
 
-            elif entity_type == ENTITY_WITH_TTL.get("surface"):
+            if entity_type == ENTITY_WITH_TTL.get("surface"):
                 if new_ttl_remaining <= 0:
-                    self._set_new_entity_state(fsm=fsm, new_state="clean_degrading", track_id=entity_id)
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                            new_ttl=ENTITY_TTL.get("ttl_surface_degrading_sec"))
+                    generated_events.append(
+                        self._create_ttl_expired_event(
+                            normalized_event=normalized_event,
+                            next_state="clean_degrading"
+                        )
+                    )
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_surface_degrading_sec"))
                 else:
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id, new_ttl=new_ttl_remaining)
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=new_ttl_remaining)
 
-            # Обновление контекста
-            self._set_new_entity_context(fsm=fsm, new_context="unknown", track_id=entity_id)
             # Обновление времени последней проверки
-            self._update_last_event_timestamp(fsm=fsm, track_id=entity_id)
+            self._update_last_event_timestamp(track_id=entity_id)
 
-        # ===============================================================================================
-        elif sanitary_state == SANITARY_STATES.get("clean_degrading"):
-            time_gap = current_timestamp - last_event_timestamp
-            new_ttl_remaining = ttl_remaining - time_gap
+        if sanitary_state == SANITARY_STATES.get("clean_degrading"):
+            # Получаем временной промежуток с момента последней проверки
+            time_gap = current_timestamp - self._last_ttl_check[str(entity_id)]
+            # Подсчет оставшегося времени, при котором сохраняется текущее состояние
+            new_ttl_remaining = self._entity_ttl[str(entity_id)] - time_gap
 
             if entity_type == ENTITY_WITH_TTL.get("employee"):
                 if new_ttl_remaining <= 0:
-                    self._set_new_entity_state(fsm=fsm, new_state="unknown", track_id=entity_id)
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                            new_ttl=0)
+                    generated_events.append(
+                        self._create_ttl_expired_event(
+                            normalized_event=normalized_event,
+                            next_state="unknown"
+                        )
+                    )
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=0)
                 else:
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id, new_ttl=new_ttl_remaining)
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=new_ttl_remaining)
 
-            elif entity_type == ENTITY_WITH_TTL.get("hands"):
+            if entity_type == ENTITY_WITH_TTL.get("hands"):
                 if new_ttl_remaining <= 0:
-                    self._set_new_entity_state(fsm=fsm, new_state="unknown", track_id=entity_id)
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                            new_ttl=0)
+                    generated_events.append(
+                        self._create_ttl_expired_event(
+                            normalized_event=normalized_event,
+                            next_state="unknown"
+                        )
+                    )
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=0)
                 else:
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id, new_ttl=new_ttl_remaining)
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=new_ttl_remaining)
 
-            elif entity_type == ENTITY_WITH_TTL.get("tool"):
+            if entity_type == ENTITY_WITH_TTL.get("tool"):
                 if new_ttl_remaining <= 0:
-                    self._set_new_entity_state(fsm=fsm, new_state="unknown", track_id=entity_id)
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                            new_ttl=0)
+                    generated_events.append(
+                        self._create_ttl_expired_event(
+                            normalized_event=normalized_event,
+                            next_state="unknown"
+                        )
+                    )
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=0)
                 else:
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id, new_ttl=new_ttl_remaining)
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=new_ttl_remaining)
 
-            elif entity_type == ENTITY_WITH_TTL.get("container"):
+            if entity_type == ENTITY_WITH_TTL.get("container"):
                 if new_ttl_remaining <= 0:
-                    self._set_new_entity_state(fsm=fsm, new_state="unknown", track_id=entity_id)
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                            new_ttl=0)
+                    generated_events.append(
+                        self._create_ttl_expired_event(
+                            normalized_event=normalized_event,
+                            next_state="unknown"
+                        )
+                    )
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=0)
                 else:
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id, new_ttl=new_ttl_remaining)
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=new_ttl_remaining)
 
-            elif entity_type == ENTITY_WITH_TTL.get("surface"):
+            if entity_type == ENTITY_WITH_TTL.get("surface"):
                 if new_ttl_remaining <= 0:
-                    self._set_new_entity_state(fsm=fsm, new_state="unknown", track_id=entity_id)
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                            new_ttl=0)
+                    generated_events.append(
+                        self._create_ttl_expired_event(
+                            normalized_event=normalized_event,
+                            next_state="unknown"
+                        )
+                    )
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=0)
                 else:
-                    self._set_ttl_remaining(fsm=fsm, track_id=entity_id, new_ttl=new_ttl_remaining)
+                    self._set_ttl_remaining(track_id=entity_id, new_ttl=new_ttl_remaining)
 
-            self._set_new_entity_context(fsm=fsm, new_context="unknown", track_id=entity_id)
-            self._update_last_event_timestamp(fsm=fsm, track_id=entity_id)
+            self._update_last_event_timestamp(track_id=entity_id)
+
+        return generated_events
 
     def _process_reset_ttl_event(self, normalized_event: Dict[str, Any], reset_result_for_ttl: list[Dict[str, Any]]):
         """Обработка TTL логики reset-события"""
@@ -284,82 +309,59 @@ class TTLLogic:
             if new_state == SANITARY_STATES.get("clean_confirmed"):
                 if entity_type == ENTITY_WITH_TTL.get("employee"):
                     if ttl_reset_type == TTL_RESET_TYPES.get("full"):
-                        self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                new_ttl=ENTITY_TTL.get("ttl_employee_confirm_sec"))
+                        self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_employee_confirm_sec"))
                     elif ttl_reset_type == TTL_RESET_TYPES.get("partial"):
-                        self._update_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                   additional_ttl=ENTITY_TTL.get("ttl_employee_confirm_sec"))
+                        self._update_ttl_remaining(track_id=entity_id, additional_ttl=ENTITY_TTL.get("ttl_employee_confirm_sec"))
                 if entity_type == ENTITY_WITH_TTL.get("hands"):
                     if ttl_reset_type == TTL_RESET_TYPES.get("full"):
-                        self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                new_ttl=ENTITY_TTL.get("ttl_hands_confirm_sec"))
+                        self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_hands_confirm_sec"))
                     elif ttl_reset_type == TTL_RESET_TYPES.get("partial"):
-                        self._update_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                   additional_ttl=ENTITY_TTL.get("ttl_hands_confirm_sec"))
+                        self._update_ttl_remaining(track_id=entity_id, additional_ttl=ENTITY_TTL.get("ttl_hands_confirm_sec"))
                 if entity_type == ENTITY_WITH_TTL.get("tool"):
                     if ttl_reset_type == TTL_RESET_TYPES.get("full"):
-                        self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                new_ttl=ENTITY_TTL.get("ttl_tool_confirm_sec"))
+                        self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_tool_confirm_sec"))
                     elif ttl_reset_type == TTL_RESET_TYPES.get("partial"):
-                        self._update_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                   additional_ttl=ENTITY_TTL.get("ttl_tool_confirm_sec"))
+                        self._update_ttl_remaining(track_id=entity_id, additional_ttl=ENTITY_TTL.get("ttl_tool_confirm_sec"))
                 if entity_type == ENTITY_WITH_TTL.get("container"):
                     if ttl_reset_type == TTL_RESET_TYPES.get("full"):
-                        self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                new_ttl=ENTITY_TTL.get("ttl_container_confirm_sec"))
+                        self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_container_confirm_sec"))
                     elif ttl_reset_type == TTL_RESET_TYPES.get("partial"):
-                        self._update_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                   additional_ttl=ENTITY_TTL.get("ttl_container_confirm_sec"))
+                        self._update_ttl_remaining(track_id=entity_id, additional_ttl=ENTITY_TTL.get("ttl_container_confirm_sec"))
                 if entity_type == ENTITY_WITH_TTL.get("surface"):
                     if ttl_reset_type == TTL_RESET_TYPES.get("full"):
-                        self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                new_ttl=ENTITY_TTL.get("ttl_surface_confirm_sec"))
+                        self._set_ttl_remaining(track_id=entity_id,  new_ttl=ENTITY_TTL.get("ttl_surface_confirm_sec"))
                     elif ttl_reset_type == TTL_RESET_TYPES.get("partial"):
-                        self._update_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                   additional_ttl=ENTITY_TTL.get("ttl_surface_confirm_sec"))
-
-                self._set_new_entity_context(fsm=fsm, new_context="sanitized", track_id=entity_id)
+                        self._update_ttl_remaining(track_id=entity_id, additional_ttl=ENTITY_TTL.get("ttl_surface_confirm_sec"))
 
             elif new_state == SANITARY_STATES.get("clean_degrading"):
                 if entity_type == ENTITY_WITH_TTL.get("employee"):
                     if ttl_reset_type == TTL_RESET_TYPES.get("full"):
-                        self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                new_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
+                        self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
                     elif ttl_reset_type == TTL_RESET_TYPES.get("partial"):
-                        self._update_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                   additional_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
+                        self._update_ttl_remaining(track_id=entity_id, additional_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
                 if entity_type == ENTITY_WITH_TTL.get("hands"):
                     if ttl_reset_type == TTL_RESET_TYPES.get("full"):
-                        self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                new_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
+                        self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
                     elif ttl_reset_type == TTL_RESET_TYPES.get("partial"):
-                        self._update_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                   additional_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
+                        self._update_ttl_remaining(track_id=entity_id, additional_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
                 if entity_type == ENTITY_WITH_TTL.get("tool"):
                     if ttl_reset_type == TTL_RESET_TYPES.get("full"):
-                        self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                new_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
+                        self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
                     elif ttl_reset_type == TTL_RESET_TYPES.get("partial"):
-                        self._update_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                   additional_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
+                        self._update_ttl_remaining(track_id=entity_id, additional_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
                 if entity_type == ENTITY_WITH_TTL.get("container"):
                     if ttl_reset_type == TTL_RESET_TYPES.get("full"):
-                        self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                new_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
+                        self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
                     elif ttl_reset_type == TTL_RESET_TYPES.get("partial"):
-                        self._update_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                   additional_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
+                        self._update_ttl_remaining(track_id=entity_id, additional_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
                 if entity_type == ENTITY_WITH_TTL.get("surface"):
                     if ttl_reset_type == TTL_RESET_TYPES.get("full"):
-                        self._set_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                new_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
+                        self._set_ttl_remaining(track_id=entity_id, new_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
                     elif ttl_reset_type == TTL_RESET_TYPES.get("partial"):
-                        self._update_ttl_remaining(fsm=fsm, track_id=entity_id,
-                                                   additional_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
+                        self._update_ttl_remaining(track_id=entity_id, additional_ttl=ENTITY_TTL.get("ttl_employee_degrading_sec"))
 
-                self._set_new_entity_context(fsm=fsm, new_context="unknown", track_id=entity_id)
+            self._update_last_event_timestamp(track_id=entity_id)
 
-            self._update_last_event_timestamp(fsm=fsm, track_id=entity_id)
 
     def _get_fsm_for_entity(self, entity_type: str):
         """Получение FSM для типа сущности"""
@@ -379,12 +381,19 @@ class TTLLogic:
             return self._fsm_hub.zone_context
         return None
 
-    def process_ttl_event(self, normalized_event: Dict[str, Any], reset_result_for_ttl: list[Dict[str, Any]]):
+    def process_ttl_event(self, normalized_event: Dict[str, Any], reset_result_for_ttl: list[Dict[str, Any]], is_reset: bool):
+        if not normalized_event:
+            logger.warning(f"Empty event: {normalized_event}")
+            return []
+
+        generated_events = []
         # Проверка было ли предыдущее событие reset-событием
-        if len(reset_result_for_ttl) == 0:
-            self._process_normal_ttl_event(normalized_event=normalized_event)
-        elif len(reset_result_for_ttl) >= 1:
+        if is_reset:
             self._process_reset_ttl_event(normalized_event=normalized_event, reset_result_for_ttl=reset_result_for_ttl)
+        else:
+            generated_events = self._process_normal_ttl_event(normalized_event=normalized_event)
+
+        return generated_events
 
 
 if __name__ == "__main__":
@@ -413,4 +422,4 @@ if __name__ == "__main__":
         {'entity_type': 'hands', 'track_id': 12, 'reset_type': 'shift_started', 'ttl_reset_type': 'full',
          'new_state': 'clean_confirmed'}
     ]
-    ttl_logic.process_ttl_event(normalized_event=pkt, reset_result_for_ttl=lst)
+    ttl_logic.process_ttl_event(normalized_event=pkt, reset_result_for_ttl=lst, is_reset=True)
