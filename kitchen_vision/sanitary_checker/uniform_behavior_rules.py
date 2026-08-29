@@ -1,3 +1,4 @@
+import json
 import queue
 import threading
 import time
@@ -25,6 +26,7 @@ class UniformBehaviorRules(threading.Thread):
         self.input_queue = input_queue
         self.out_queue = out_queue
         self._T_uniform_confirm_sec = 1.0
+        self._employee_confidence_floor = 0.9
 
         self._is_no_cap_detected: dict = {}
         self._no_cap_detected_timestamp: dict = {}
@@ -36,6 +38,9 @@ class UniformBehaviorRules(threading.Thread):
         self._phone_usage_timestamp: dict = {}
         self._is_face_touch_detected: dict = {}
         self._face_touch_timestamp: dict = {}
+
+        self._known_cameras = []
+        self._generated_violations_per_employee = {}
 
     def run(self):
         while not self.stop_event.is_set():
@@ -53,19 +58,27 @@ class UniformBehaviorRules(threading.Thread):
         if pkt is None:
             return
 
+        if pkt["camera_id"] not in self._known_cameras:
+            self._is_no_cap_detected[pkt["camera_id"]] = False
+            self._is_no_apron_detected[pkt["camera_id"]] = False
+            self._is_no_glove_detected[pkt["camera_id"]] = False
+            self._is_face_touch_detected[pkt["camera_id"]] = False
+            self._is_phone_usage_detected[pkt["camera_id"]] = False
+            self._known_cameras.append(pkt["camera_id"])
+
         events = self._detect_no_cap(pkt)
         if events is not None and len(events) > 0:
             self._emit_events(events=events)
-        events = self._detect_no_gloves(pkt)
-        if events is not None and len(events) > 0:
-            self._emit_events(events=events)
-        events = self._detect_no_apron(pkt)
-        if events is not None and len(events) > 0:
-            self._emit_events(events=events)
-        events = self._detect_phone_usage(pkt)
-        if events is not None and len(events) > 0:
-            self._emit_events(events=events)
-    
+        # events = self._detect_no_gloves(pkt)
+        # if events is not None and len(events) > 0:
+        #     self._emit_events(events=events)
+        # events = self._detect_no_apron(pkt)
+        # if events is not None and len(events) > 0:
+        #     self._emit_events(events=events)
+        # events = self._detect_phone_usage(pkt)
+        # if events is not None and len(events) > 0:
+        #     self._emit_events(events=events)
+
     def _emit_events(self, events):
         if not events:
             return
@@ -81,7 +94,7 @@ class UniformBehaviorRules(threading.Thread):
                         self.out_queue.put(event, timeout=0.1)
                     except Exception:
                         logger.warning("Failed to push action event to out_queue")
-    
+
     def _generate_sanitary_event(self,
                                  event_type: str,
                                  zone_id: str,
@@ -127,7 +140,11 @@ class UniformBehaviorRules(threading.Thread):
         zone_id = pkt.get("zone_id", "")
         facts = pkt["facts"]
         identities = pkt["identities"]
-        
+
+        person = self._get_fact_by_object_class(facts, "person")
+        if not person or person["confidence"] is None or person["confidence"] < self._employee_confidence_floor:
+            return None
+
         generated_events = []
 
         # строим маппинг track_lineage_id -> employee_id из identities
@@ -141,7 +158,6 @@ class UniformBehaviorRules(threading.Thread):
                     "executor_attribution": id_item.get("executor_attribution", "unresolved"),
                 }
 
-        person = self._get_fact_by_object_class(facts, "person")
         track_id = person.get("track_id", "")
         track_linage_id = person.get("track_lineage_id")
 
@@ -150,27 +166,19 @@ class UniformBehaviorRules(threading.Thread):
         employee_confidence = identity.get("employee_confidence", 0.0) if identity else None
 
         cap = self._get_fact_by_object_class(facts, "cap")
-        cap_id = cap.get("track_id", "")
-        if person is None or person["confidence"] < 0.4:
-            self._is_no_cap_detected[cam_id] = False
-            return None
-
-        person_bbox = self._parse_bbox(person["bbox"])
-        cap_bbox = self._parse_bbox(cap["bbox"])
-        if cap is not None and cap["confidence"] > 0.4:
-            if self._iou(person_bbox, cap_bbox) == 0:
-                self._is_no_cap_detected[cam_id] = True
-                self._no_cap_detected_timestamp[cam_id] = time.time()
-            else:
-                if self._is_no_cap_detected.get(cam_id, False):
-                    self._is_no_cap_detected[cam_id] = False
+        if cap is None and not self._is_no_cap_detected.get(cam_id, False):
+            self._is_no_cap_detected[cam_id] = True
+            self._no_cap_detected_timestamp[cam_id] = time.time()
         else:
-            if not self._is_no_cap_detected.get(cam_id, False):
-                self._is_no_cap_detected[cam_id] = True
-                self._no_cap_detected_timestamp[cam_id] = time.time()
+            if cap is not None and self._is_no_cap_detected.get(cam_id):
+                self._is_no_cap_detected[cam_id] = False
 
-        if self._is_no_cap_detected.get(cam_id, False) and time.time() - self._no_cap_detected_timestamp.get(cam_id,
-                                                                                                             0) > self._T_uniform_confirm_sec:
+        time_since_last_no_cap_violation = time.time() - self._generated_violations_per_employee.get(employee_id, 0)
+        violation_time = time.time() - self._no_cap_detected_timestamp.get(cam_id,0)
+
+        if (self._is_no_cap_detected.get(cam_id) and violation_time > self._T_uniform_confirm_sec
+                and time_since_last_no_cap_violation > self._T_uniform_confirm_sec * 5):
+
             event = self._generate_sanitary_event(
                 event_type="no_cap",
                 zone_id=zone_id,
@@ -180,10 +188,12 @@ class UniformBehaviorRules(threading.Thread):
                 track_id=track_id,
                 track_lineage_id=track_linage_id
             )
-            
+
+            self._generated_violations_per_employee[employee_id] = time.time()
+
             generated_events.append(event)
             self._is_no_cap_detected[cam_id] = False
-        
+
         return generated_events
 
     def _detect_no_gloves(self, pkt):
@@ -192,6 +202,10 @@ class UniformBehaviorRules(threading.Thread):
         facts = pkt["facts"]
         identities = pkt["identities"]
 
+        person = self._get_fact_by_object_class(facts, "person")
+        if not person or person["confidence"] is None or person["confidence"] < self._employee_confidence_floor:
+            return None
+
         generated_events = []
 
         # строим маппинг track_lineage_id -> employee_id из identities
@@ -205,7 +219,6 @@ class UniformBehaviorRules(threading.Thread):
                     "executor_attribution": id_item.get("executor_attribution", "unresolved"),
                 }
 
-        person = self._get_fact_by_object_class(facts, "person")
         track_id = person.get("track_id", "")
         track_linage_id = person.get("track_lineage_id")
 
@@ -213,30 +226,22 @@ class UniformBehaviorRules(threading.Thread):
         employee_id = identity.get("employee_id") if identity else None
         employee_confidence = identity.get("employee_confidence", 0.0) if identity else None
 
-        person = self._get_fact_by_object_class(facts, "person")
         glove = self._get_fact_by_object_class(facts, "glove")
-        if person is None or person["confidence"] < 0.4:
-            self._is_no_glove_detected[cam_id] = False
-            return None
-
-        person_bbox = self._parse_bbox(person["bbox"])
-        glove_bbox = self._parse_bbox(glove["bbox"])
-        if glove is not None and glove["confidence"] > 0.4:
-            if self._iou(person_bbox, glove_bbox) == 0:
-                self._is_no_glove_detected[cam_id] = True
-                self._no_glove_detected_timestamp[cam_id] = time.time()
-            else:
-                if self._is_no_glove_detected.get(cam_id, False):
-                    self._is_no_glove_detected[cam_id] = False
+        if glove is None and not self._is_no_glove_detected.get(cam_id, False):
+            self._is_no_glove_detected[cam_id] = True
+            self._no_glove_detected_timestamp[cam_id] = time.time()
         else:
-            if not self._is_no_glove_detected.get(cam_id, False):
-                self._is_no_glove_detected[cam_id] = True
-                self._no_glove_detected_timestamp[cam_id] = time.time()
+            if glove is not None and self._is_no_glove_detected.get(cam_id):
+                self._is_no_glove_detected[cam_id] = False
 
-        if self._is_no_glove_detected.get(cam_id, False) and time.time() - self._no_glove_detected_timestamp.get(cam_id,
-                                                                                                                 0) > self._T_uniform_confirm_sec:
+        time_since_last_no_glove_violation = time.time() - self._generated_violations_per_employee.get(employee_id, 0)
+        violation_time = time.time() - self._no_glove_detected_timestamp.get(cam_id, 0)
+
+        if (self._is_no_glove_detected.get(cam_id) and violation_time > self._T_uniform_confirm_sec
+                and time_since_last_no_glove_violation > self._T_uniform_confirm_sec * 5):
+
             event = self._generate_sanitary_event(
-                event_type="no_cap",
+                event_type="no_gloves",
                 zone_id=zone_id,
                 camera_id=cam_id,
                 employee_id=employee_id,
@@ -244,10 +249,12 @@ class UniformBehaviorRules(threading.Thread):
                 track_id=track_id,
                 track_lineage_id=track_linage_id
             )
-            
+
+            self._generated_violations_per_employee[employee_id] = time.time()
+
             generated_events.append(event)
             self._is_no_glove_detected[cam_id] = False
-        
+
         return generated_events
 
     def _detect_no_apron(self, pkt):
@@ -256,6 +263,10 @@ class UniformBehaviorRules(threading.Thread):
         facts = pkt["facts"]
         identities = pkt["identities"]
 
+        person = self._get_fact_by_object_class(facts, "person")
+        if not person or person["confidence"] is None or person["confidence"] < self._employee_confidence_floor:
+            return None
+
         generated_events = []
 
         # строим маппинг track_lineage_id -> employee_id из identities
@@ -269,7 +280,6 @@ class UniformBehaviorRules(threading.Thread):
                     "executor_attribution": id_item.get("executor_attribution", "unresolved"),
                 }
 
-        person = self._get_fact_by_object_class(facts, "person")
         track_id = person.get("track_id", "")
         track_linage_id = person.get("track_lineage_id")
 
@@ -277,30 +287,22 @@ class UniformBehaviorRules(threading.Thread):
         employee_id = identity.get("employee_id") if identity else None
         employee_confidence = identity.get("employee_confidence", 0.0) if identity else None
 
-        person = self._get_fact_by_object_class(facts, "person")
         apron = self._get_fact_by_object_class(facts, "apron")
-        if person is None or person["confidence"] < 0.4:
-            self._is_no_apron_detected[cam_id] = False
-            return None
-
-        person_bbox = self._parse_bbox(person["bbox"])
-        apron_bbox = self._parse_bbox(apron["bbox"])
-        if apron is not None and apron["confidence"] > 0.4:
-            if self._iou(person_bbox, apron_bbox) == 0:
-                self._is_no_apron_detected[cam_id] = True
-                self._no_apron_detected_timestamp[cam_id] = time.time()
-            else:
-                if self._is_no_apron_detected.get(cam_id, False):
-                    self._is_no_apron_detected[cam_id] = False
+        if apron is None and not self._is_no_apron_detected.get(cam_id, False):
+            self._is_no_apron_detected[cam_id] = True
+            self._no_apron_detected_timestamp[cam_id] = time.time()
         else:
-            if not self._is_no_apron_detected.get(cam_id, False):
-                self._is_no_apron_detected[cam_id] = True
-                self._no_apron_detected_timestamp[cam_id] = time.time()
+            if apron is not None and self._is_no_apron_detected.get(cam_id):
+                self._is_no_apron_detected[cam_id] = False
 
-        if self._is_no_apron_detected.get(cam_id, False) and time.time() - self._no_apron_detected_timestamp.get(cam_id,
-                                                                                                                 0) > self._T_uniform_confirm_sec:
+        time_since_last_no_apron_violation = time.time() - self._generated_violations_per_employee.get(employee_id, 0)
+        violation_time = time.time() - self._no_apron_detected_timestamp.get(cam_id, 0)
+
+        if (self._is_no_apron_detected.get(cam_id) and violation_time > self._T_uniform_confirm_sec
+                and time_since_last_no_apron_violation > self._T_uniform_confirm_sec * 5):
+
             event = self._generate_sanitary_event(
-                event_type="no_cap",
+                event_type="no_apron",
                 zone_id=zone_id,
                 camera_id=cam_id,
                 employee_id=employee_id,
@@ -308,10 +310,12 @@ class UniformBehaviorRules(threading.Thread):
                 track_id=track_id,
                 track_lineage_id=track_linage_id
             )
-            
+
+            self._generated_violations_per_employee[employee_id] = time.time()
+
             generated_events.append(event)
             self._is_no_apron_detected[cam_id] = False
-        
+
         return generated_events
 
     def _detect_phone_usage(self, pkt):
@@ -320,6 +324,10 @@ class UniformBehaviorRules(threading.Thread):
         facts = pkt["facts"]
         identities = pkt["identities"]
 
+        person = self._get_fact_by_object_class(facts, "person")
+        if not person or person["confidence"] is None or person["confidence"] < self._employee_confidence_floor:
+            return None
+
         generated_events = []
 
         # строим маппинг track_lineage_id -> employee_id из identities
@@ -333,7 +341,6 @@ class UniformBehaviorRules(threading.Thread):
                     "executor_attribution": id_item.get("executor_attribution", "unresolved"),
                 }
 
-        person = self._get_fact_by_object_class(facts, "person")
         track_id = person.get("track_id", "")
         track_linage_id = person.get("track_lineage_id")
 
@@ -341,11 +348,9 @@ class UniformBehaviorRules(threading.Thread):
         employee_id = identity.get("employee_id") if identity else None
         employee_confidence = identity.get("employee_confidence", 0.0) if identity else None
 
-        person = self._get_fact_by_object_class(facts, "person")
         phone = self._get_fact_by_object_class(facts, "phone")
         hands = self._get_fact_by_object_class(facts, "hands")
-        if person is None or person["confidence"] < 0.4 or phone is None or phone["confidence"] < 0.4 \
-                or hands is None or hands["confidence"] < 0.4:
+        if phone is None or phone["confidence"] < 0.5 or hands is None or hands["confidence"] < 0.5:
             self._is_phone_usage_detected[cam_id] = False
             return None
 
@@ -355,18 +360,21 @@ class UniformBehaviorRules(threading.Thread):
         person_bbox_center = self._calculate_bbox_center(person_bbox)
         hands_bbox_center = self._calculate_bbox_center(hands_bbox)
 
-        if self._iou(hands_bbox, phone_bbox) >= 0.5 \
-                and self._calculate_distance(person_bbox_center, hands_bbox_center) < 1.0:
+        if self._iou(hands_bbox, phone_bbox) >= 0.5 > self._calculate_distance(person_bbox_center, hands_bbox_center):
             if not self._is_phone_usage_detected.get(cam_id, False):
                 self._is_phone_usage_detected[cam_id] = True
                 self._phone_usage_timestamp[cam_id] = time.time()
         else:
             self._is_phone_usage_detected[cam_id] = False
 
-        if self._is_phone_usage_detected.get(cam_id, False) and time.time() - self._phone_usage_timestamp.get(cam_id,
-                                                                                                              0) > self._T_uniform_confirm_sec:
+        time_since_last_phone_usage_violation = time.time() - self._generated_violations_per_employee.get(employee_id, 0)
+        violation_time = time.time() - self._phone_usage_timestamp.get(cam_id, 0)
+
+        if (self._is_phone_usage_detected.get(cam_id, False) and violation_time > self._T_uniform_confirm_sec
+                and time_since_last_phone_usage_violation > self._T_uniform_confirm_sec * 5):
+
             event = self._generate_sanitary_event(
-                event_type="no_cap",
+                event_type="phone_usage",
                 zone_id=zone_id,
                 camera_id=cam_id,
                 employee_id=employee_id,
@@ -374,10 +382,10 @@ class UniformBehaviorRules(threading.Thread):
                 track_id=track_id,
                 track_lineage_id=track_linage_id
             )
-            
+
             generated_events.append(event)
             self._is_phone_usage_detected[cam_id] = False
-        
+
         return generated_events
 
     def _calculate_employee_and_stuff_distance(self, employee_id: str, stuff_id: str, data_pkt):
