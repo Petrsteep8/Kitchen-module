@@ -1,5 +1,6 @@
 import queue
 import logging
+from typing import Optional
 
 from kitchen_vision.action_detector import ActionDetector
 from kitchen_vision.pattern_analyzer import MotionPatternAnalyzer
@@ -14,9 +15,23 @@ from kitchen_gateway.action_card_cache import ActionCardCache
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("facts_consumer")
 
+
+class ZoneResolver:
+    def __init__(self, zone_config: dict):
+        self.zones = zone_config.get("zones", [])
+        self.calibration = zone_config.get("calibration", {})
+
+    def get_zone(self, zone_id: str) -> Optional[dict]:
+        for z in self.zones:
+            if z.get("zone_id") == zone_id:
+                return z
+        return None
+
+
 class FactsConsumer:
     def __init__(self, cams = None):
         self._cameras = cams or [{"camera_id": "Kitchen_1", "source": 0}]
+        self._zone_resolver = ZoneResolver()
 
         # Единая очередь для выходных событий
         self._out_action_queue = queue.Queue(maxsize=64)
@@ -58,7 +73,7 @@ class FactsConsumer:
         self._intrusion_control = IntrusionControl(
             input_queue=self._input_intrusion_control_queue,
             out_queue=self._out_action_queue,
-            intrusion_zone_resolver=None,
+            intrusion_zone_resolver=self._zone_resolver,
             observation_fsm=None
         )
         self._intrusion_control.daemon = True
