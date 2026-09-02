@@ -221,12 +221,14 @@ class EventPipeline(threading.Thread):
             contamination_table=self._contamination_table
         )
 
+        logger.info("EventPipeline initialized")
+
     def run(self):
         while not self.stop_event.is_set():
             try:
                 pkt = self._input_queue.get()
                 if pkt is not None:
-                    print(pkt)
+                    pass
             except queue.Empty:
                 continue
 
@@ -283,6 +285,9 @@ class EventPipeline(threading.Thread):
         priority = 0
 
         if event_type == self._event_types["ttl_expired"]:
+            target_entities.append({
+                payload.get("target_entity_type"): payload.get("target_entity_id")
+            })
             event_details = payload["next_state"]
             priority = 6
 
@@ -317,7 +322,9 @@ class EventPipeline(threading.Thread):
             priority = 0
 
         elif event_type == self._event_types["contamination_event"]:
-            target_entities.append({payload.get("target_entity"): payload.get("target_entity_id")})
+            target_entities.append({
+                payload.get("target_entity"): payload.get("target_entity_id")
+            })
             event_details = payload.get("contamination_type")
 
             if payload.get("priority") == "high":
@@ -354,7 +361,7 @@ class EventPipeline(threading.Thread):
 
     def choose_event_by_priority(self, event_data_for_fsm_transition: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if len(event_data_for_fsm_transition) > 0:
-            lst.sort(key=lambda event: event["priority"])
+            lst.sort(key=lambda e: event["priority"])
 
         return lst[0]
 
