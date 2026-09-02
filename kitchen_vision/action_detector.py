@@ -592,10 +592,32 @@ class ActionDetector(threading.Thread):
         return packet
 
     def make_data_quality_packet(self, pkt: Dict, reason: str) -> Dict[str, Any]:
-        return {
-            "action_id": str(uuid.uuid4()),
+        timestamp = pkt.get("timestamp", time.time())
+        camera_id = pkt.get("camera_id", None)
+        action_id = str(uuid.uuid4())
+
+        data_quality_event = {
+            "data_quality_event_id": action_id,
             "reason": reason,
             "observation_state": "obs_ok"
+        }
+
+        return {
+            "event_id": action_id,
+            "timestamp": timestamp,
+            "event_type": "sanitary_event",
+            "camera_id": camera_id,
+            "entity_id": camera_id,
+            "entity_type": "system",
+            "confidence": 1.0,
+            "time_source": "server_ntp",
+            "late": False,
+            "track_lineage_id": None,
+            "executor_attribution": None,
+            "rules_config_version": None,
+            "model_versions": None,
+            "decision_trace": None,
+            "payload": data_quality_event,
         }
 
     def __finish_action(self, camera_id: str, end_reason: str, pkt: Dict) -> Dict[str, Any]:
