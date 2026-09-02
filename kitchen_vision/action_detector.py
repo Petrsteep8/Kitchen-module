@@ -526,26 +526,47 @@ class ActionDetector(threading.Thread):
     def make_action_start_packet(self, camera_id: str, pkt: Dict) -> Dict[str, Any]:
         d = self.__detected_actions[camera_id]
 
-        packet = {
-            "event_type": "ACTION_START",
-            "action_id": d["action_id"],
+        objects = self.__filter_objects(self.extract_normalized_objects(pkt))
+
+        employee_obj = self.__get_action_employee_object(camera_id, objects)
+        if employee_obj is not None:
+            if employee_obj.get("face_score") is not None:
+                employee_confidence = float(employee_obj["face_score"])
+            else:
+                employee_confidence = float(employee_obj.get("confidence", 0.0))
+        else:
+            employee_confidence = float(d.get("employee_confidence", 0.0))
+
+        action_id = str(uuid.uuid4())
+        timestamp = pkt.get("timestamp", time.time())
+        employee_id = d.get("employee_id", None)
+        obj = pkt.get("objects", [])[0]
+
+        action_start = {
+            "action_id": action_id,
             "employee_id": d.get("employee_id"),
-            "camera_id": camera_id,
             "zone_id": camera_id,
             "action_type": d["action_type"],
-            "timestamp_start": d["timestamp_start"],
-            "hygiene": d.get("hygiene"),
-            "motion_patterns": pkt.get("motion_patterns", {}),
-            "objects": pkt.get("objects", []),  # [cite: 9]
+            "objects": obj,  # [cite: 9]
         }
 
-        # Прокидываем новые данные в выходные события[cite: 10]
-        if "facts" in pkt:
-            packet["facts"] = pkt["facts"]
-        if "identities" in pkt:
-            packet["identities"] = pkt["identities"]
-
-        return packet
+        return {
+            "event_id": action_id,
+            "timestamp": timestamp,
+            "event_type": "action_end",
+            "camera_id": camera_id,
+            "entity_id": employee_id,
+            "entity_type": "employee",
+            "confidence": employee_confidence,
+            "time_source": "server_ntp",
+            "late": False,
+            "track_lineage_id": None,
+            "executor_attribution": None,
+            "rules_config_version": None,
+            "model_versions": None,
+            "decision_trace": None,
+            "payload": action_start,
+        }
 
     def make_action_end_packet(self, camera_id: str, pkt: Dict, end_reason: str) -> Dict[str, Any]:
         d = self.__detected_actions[camera_id]
@@ -577,9 +598,13 @@ class ActionDetector(threading.Thread):
         if carrying_food:
             carrying_type = "food"
 
-        packet = {
-            "action_id": d["action_id"],
-            "employee_id": d.get("employee_id", None),
+        action_id = str(uuid.uuid4())
+        timestamp = pkt.get("timestamp", time.time())
+        employee_id = d.get("employee_id", None)
+
+        action_end = {
+            "action_id": action_id,
+            "employee_id": employee_id,
             "action_type": d["action_type"],
             "camera_id": camera_id,
             "zone_id": camera_id,
@@ -589,7 +614,23 @@ class ActionDetector(threading.Thread):
             "carrying_confidence": max(0.0, min(1.0, employee_confidence))
         }
 
-        return packet
+        return {
+            "event_id": action_id,
+            "timestamp": timestamp,
+            "event_type": "action_end",
+            "camera_id": camera_id,
+            "entity_id": employee_id,
+            "entity_type": "employee",
+            "confidence": employee_confidence,
+            "time_source": "server_ntp",
+            "late": False,
+            "track_lineage_id": None,
+            "executor_attribution": None,
+            "rules_config_version": None,
+            "model_versions": None,
+            "decision_trace": None,
+            "payload": action_end,
+        }
 
     def make_data_quality_packet(self, pkt: Dict, reason: str) -> Dict[str, Any]:
         timestamp = pkt.get("timestamp", time.time())
@@ -605,7 +646,7 @@ class ActionDetector(threading.Thread):
         return {
             "event_id": action_id,
             "timestamp": timestamp,
-            "event_type": "sanitary_event",
+            "event_type": "data_quality_event",
             "camera_id": camera_id,
             "entity_id": camera_id,
             "entity_type": "system",
