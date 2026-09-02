@@ -23,7 +23,10 @@ class FactsConsumer:
 
         # OBS logic
         self._input_obs_logic_queue = queue.Queue(maxsize=64)
-        self._obs_logic = ObservationLogic(input_queue=self._input_obs_logic_queue)
+        self._obs_logic = ObservationLogic(
+            input_queue=self._input_obs_logic_queue,
+            out_queue=self._out_action_queue,
+        )
         self._obs_logic.daemon = True
         self._obs_logic.start()
 
