@@ -1,35 +1,75 @@
-# requirements.txt — Kitchen Module (заменяет requariments.txt: UTF-16->UTF-8, опечатка в имени, без пинов)
-#
-# Версии ниже — МИНИМУМЫ. Зафиксировать точные на целевом GPU-окружении:
-#   pip freeze > requirements.lock.txt
-# и коммитить lock рядом (воспроизводимость, §8/§44).
-
-# --- детекция/трекинг ---
-ultralytics>=8.2.0          # YOLOv8 (Enterprise License — см. NOTICE). НЕ apt; ставить из PyPI
-supervision>=0.18.0         # ByteTrack (Apache-2.0), per-camera инстансы
-torch>=2.1.0
-torchvision>=0.16.0
-
-# --- идентификация (ArcFace) ---
-insightface>=0.7.3          # buffalo_l
-onnxruntime-gpu>=1.17.0     # для CPU-сборки заменить на onnxruntime
-
-
-# --- кросс-камерный re-id (appearance) ---
-torchreid>=1.4.0            # OSNet (КОД — MIT). ВНИМАНИЕ: публичные веса OSNet обучены на
-                            # research-only датасетах (Market-1501/MSMT17/DukeMTMC) — для
-                            # коммерции чекпойнт обучить на своих/чистых данных (юр-проверка).
-
-# --- геометрия зон ---
-shapely>=2.0.0              # point-in-polygon + гистерезис (буфер)
-
-# --- общие ---
-opencv-python>=4.9.0
-numpy>=1.26.0
-PyYAML>=6.0
-pydantic>=2.6.0             # контракты gateway (backend)
-
-# Примечание: watchdog убран — hot-reload моделей из старого ai_perception удалён вместе с ним.
-
-# --- инструменты (tools/annotate_zones.py) ---
-matplotlib>=3.7.0          # интерактивная разметка зон (нужен дисплей)
+albucore==0.0.24
+albumentations==2.0.8
+annotated-types==0.7.0
+beautifulsoup4==4.15.0
+certifi==2026.4.22
+charset-normalizer==3.4.7
+colorama==0.4.6
+contourpy==1.3.3
+cycler==0.12.1
+Cython==3.2.4
+defusedxml==0.7.1
+easydict==1.13
+filelock==3.29.0
+flatbuffers==25.12.19
+fonttools==4.62.1
+fsspec==2026.4.0
+gdown==6.1.0
+idna==3.13
+ImageIO==2.37.3
+insightface==0.7.3
+Jinja2==3.1.6
+joblib==1.5.3
+kiwisolver==1.5.0
+lazy-loader==0.5
+MarkupSafe==3.0.3
+matplotlib==3.10.9
+ml_dtypes==0.5.4
+mpmath==1.3.0
+networkx==3.6.1
+numpy==2.4.4
+onnx==1.21.0
+onnxruntime==1.25.1
+opencv-python==4.13.0.92
+opencv-python-headless==4.13.0.92
+packaging==26.2
+pillow==12.2.0
+polars==1.40.1
+polars-runtime-32==1.40.1
+prettytable==3.17.0
+protobuf==7.34.1
+psutil==7.2.2
+pydantic==2.13.3
+pydantic_core==2.46.3
+pyDeprecate==0.9.0
+pyparsing==3.3.2
+PySocks==1.7.1
+python-dateutil==2.9.0.post0
+PyYAML==6.0.3
+redis==7.4.0
+requests==2.33.1
+scikit-image==0.26.0
+scikit-learn==1.8.0
+scipy==1.17.1
+setuptools==78.1.0
+shapely==2.1.2
+simsimd==6.5.16
+six==1.17.0
+soupsieve==2.8.4
+stringzilla==4.6.0
+supervision==0.29.1
+sympy==1.14.0
+threadpoolctl==3.6.0
+tifffile==2026.4.11
+torch==2.13.0+cu132
+torchreid==0.2.5
+torchvision==0.28.0+cu132
+tqdm==4.67.3
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+ultralytics==8.4.42
+ultralytics-thop==2.0.19
+urllib3==2.6.3
+utils==1.0.2
+watchdog==6.0.0
+wcwidth==0.6.0
