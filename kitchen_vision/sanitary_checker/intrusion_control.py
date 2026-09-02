@@ -36,6 +36,16 @@ OBSERVATION_STATES = {
     "obs_lost": "obs_lost",
 }
 
+allowed = {
+    "prep_main": {"emp_007_ivan", "emp_008_petr"},
+}
+config = {
+    "T_intrusion_confirm_sec": 2.0,
+    "person_confidence_threshold": 0.8,
+    "employee_confidence_floor": 0.5,
+    "allowed_employees_per_zone": allowed,
+}
+
 
 class IntrusionControl(threading.Thread):
     """
@@ -48,8 +58,8 @@ class IntrusionControl(threading.Thread):
             self,
             input_queue: queue.Queue,
             out_queue: queue.Queue,
-            intrusion_zone_resolver: ZoneResolver,
-            observation_fsm: ObservationFSM,
+            intrusion_zone_resolver: ZoneResolver = None,
+            observation_fsm: ObservationFSM = None,
             intrusion_config: Optional[Dict[str, Any]] = None,
     ):
         """
@@ -235,6 +245,7 @@ class IntrusionControl(threading.Thread):
             track_lineage_id = fact.get("track_lineage_id")
             confidence = fact.get("confidence", 0.0)
             bbox = fact.get("bbox")
+            camera_id = fact.get("camera_id")
             zone_id = fact.get("zone_id")  # может быть None
 
             # Проверка минимальной уверенности для person (по условию)
@@ -346,9 +357,10 @@ class IntrusionControl(threading.Thread):
 
         entity_id = employee_id if employee_id else track_id
         entity_type = "employee" if employee_id else "system"  # или "system" для неизвестного
+        action_id = str(uuid.uuid4())
 
         sanitary_event = {
-            "sanitary_event_id": str(uuid.uuid4()),
+            "sanitary_event_id": action_id,
             "sanitary_event_type": "intrusion_work_zone",
             "source_context": None,
             "target_context": None,
@@ -363,7 +375,7 @@ class IntrusionControl(threading.Thread):
         }
 
         return {
-            "event_id": str(uuid.uuid4()),
+            "event_id": action_id,
             "timestamp": timestamp,
             "event_type": "sanitary_event",
             "camera_id": camera_id,
@@ -380,58 +392,3 @@ class IntrusionControl(threading.Thread):
             "payload": sanitary_event,
         }
 
-
-# ============================================================================
-# Пример использования
-# ============================================================================
-
-if __name__ == "__main__":
-    t1 = time.time() / 1000
-    # Загрузка zones.yaml
-    with open("zones.yaml", "r") as f:
-        zones_config = yaml.safe_load(f)
-
-    zone_resolver = ZoneResolver(zones_config)
-    obs_fsm = ObservationFSM()
-
-    # Разрешённые сотрудники для зон (заглушка)
-    allowed = {
-        "prep_main": {"emp_007_ivan", "emp_008_petr"},
-    }
-
-    config = {
-        "T_intrusion_confirm_sec": 2.0,
-        "person_confidence_threshold": 0.8,
-        "employee_confidence_floor": 0.5,
-        "allowed_employees_per_zone": allowed,
-    }
-
-    intrusion = IntrusionControl(zone_resolver, obs_fsm, config)
-
-    # Пример данных (из data.json)
-    facts = [
-        {
-            "track_id": "42",
-            "track_lineage_id": "global-uuid-1234-5678",
-            "object_class": "person",
-            "bbox": [150.5, 80.0, 400.2, 700.8],
-            "confidence": 0.8912,
-            "zone_id": "prep_main",
-        }
-    ]
-    identities = [
-        {
-            "track_lineage_id": "global-uuid-1234-5678",
-            "employee_id": "emp_007_ivan",
-            "employee_confidence": 0.95,
-        }
-    ]
-    camera_id = "Kitchen_1"
-    timestamp = 1696154312000
-
-    events = intrusion.update_facts(facts, identities, timestamp)
-    for ev in events:
-        print("Generated event:", ev)
-
-    t2 = time.time() / 1000
-    print(t2 - t1)
