@@ -3,7 +3,7 @@ import threading
 import time
 import uuid
 import logging
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("zone_exit_control")
@@ -15,17 +15,18 @@ SEVERITY_MAP = {
 
 
 class ZoneExitControl(threading.Thread):
-    def __init__(self, input_action_queue: queue.Queue, input_data_queue: queue.Queue):
+    def __init__(self, input_action_queue: queue.Queue, input_data_queue: queue.Queue, out_queue: queue.Queue):
         super().__init__(daemon=True)
         self.stop_event = threading.Event()
 
         self._input_action_queue = input_action_queue
         self._input_data_queue = input_data_queue
+        self.out_queue = out_queue
 
         # Показывает нужно ли перехватывать данные с камеры
         self._camera_capture_data: Dict[str, Tuple[bool, Dict[str, Optional]]] = dict()
 
-        # _started_camera_data = {
+        # _data_capture_started = {
         #   "camera_id": {
         #       "start": (employee_id, food_id),
         #       "timestamp_handoff_confirm_window_sec": time.time(),
@@ -33,13 +34,15 @@ class ZoneExitControl(threading.Thread):
         #       "end": ((new)employee_id, food_id)
         #   }
         # }
-        self._started_camera_data: Dict[str, Dict[str, Optional]] = dict()
+        self._data_capture_started: Dict[str, Dict[str, Optional]] = dict()
 
         # Реестр П1
         self._handoff_confirm_window_sec: float = 2.0
         self._T_handoff_confirm_sec: float = 0.6
         self._handoff_radius_m = 3.0
         self._handoff_nearest_margin_m = 0.5
+
+        self._known_cameras = []
 
     def run(self):
         while not self.stop_event.is_set():
@@ -52,68 +55,83 @@ class ZoneExitControl(threading.Thread):
                         self._init_data_capture(action_pkt=action_pkt)
 
                 # Проверка, есть ли данные с камер наблюдения ml-модуля
-                self._check_data_queue()
+                self.process_pkt()
             except queue.Empty:
-                self._check_data_queue()
+                self.process_pkt()
 
     def stop(self):
         self.stop_event.set()
 
-    def process_pkt(self, data_pkt):
-        camera_id = data_pkt.get("camera_id", None)
-        if self._started_camera_data[camera_id]:
-            pass
+    def process_pkt(self):
+        pkt = self._input_data_queue.get()
+        if pkt is None:
+            return
 
-        action_pkt = {}
+        if pkt["camera_id"] not in self._known_cameras:
+            self._camera_capture_data[pkt["camera_id"]] = (False, {})
+            self._known_cameras.append(pkt["camera_id"])
+
+        camera_id = pkt.get("camera_id", None)
         if camera_id is not None and self._camera_capture_data[camera_id][0] == True:
-            action_pkt = self._camera_capture_data[camera_id][1]
+            events = self.update_events(pkt=pkt)
+            if events and len(events) > 0:
+                self._emit_events(events=events)
 
-        end_reason = action_pkt.get("end_reason", None)
-        carrying_type = action_pkt.get("carrying_type", None)
-        if end_reason == "left_zone" and carrying_type == "tool":
-            observation_state = action_pkt.get("observation_state", "obs_ok")
-            if observation_state in ("obs_ok", "obs_weak"):
-                sanitary_event = self._generate_sanitary_event(sanitary_event_type="left_zone",
-                                                               zone_id=action_pkt.get("zone_id"))
-                return sanitary_event
+    def _emit_events(self, events):
+        if not events:
+            return
+
+        import json
+        for event in events:
+            logger.info("SANITARY EVENT JSON:\n%s", json.dumps(event, ensure_ascii=False, indent=2, default=str))
+            if self.out_queue is not None:
+                try:
+                    self.out_queue.put_nowait(event)
+                except Exception:
+                    try:
+                        self.out_queue.put(event, timeout=0.1)
+                    except Exception:
+                        logger.warning("Failed to push sanitary event to out_queue")
+
+    def update_events(self, pkt) -> List | None:
+        camera_id = pkt.get("camera_id", None)
+        facts = pkt.get("facts", None)
+        identities = pkt.get("identities", None)
+        generated_events = []
+
+        if not camera_id or not facts or not identities:
+            logger.warning(f"Empty packet, skipping...")
             return None
 
-        if end_reason == "left_zone" and carrying_type == "food":
-            employee_id = self._get_employee_id(action_pkt=action_pkt, data_pkt=data_pkt)
-            food_id = self._get_food_id(data_pkt=data_pkt)
-
-            # Нужно убедиться, что именно этот работник вышел из зоны с этим блюдом(едой)
-            # Так как в кадр может случайно попасть не та еда, что приведёт к потенциально ложному нарушению
-            employee_food_distance = self._calculate_employee_and_food_distance(employee_id=employee_id,
-                                                                                food_id=food_id, data_pkt=data_pkt)
-            if not employee_id or not food_id:
-                logger.warning(f"employee id or food id in none, skipping...")
-                return None
-
-            if employee_food_distance is not None and employee_food_distance < 0.5:
-                self._started_camera_data[camera_id] = {
-                    "start": (employee_id, food_id),
-                    "timestamp_handoff_confirm_window_sec": time.time(),
-                    "timestamp_T_handoff_confirm_sec": None,
-                    "end": None
+        # Сначала строим маппинг track_lineage_id -> employee_id из identities
+        identity_map: Dict[str, Dict] = {}
+        for id_item in identities:
+            lineage_id = id_item.get("track_lineage_id")
+            if lineage_id:
+                identity_map[lineage_id] = {
+                    "employee_id": id_item.get("employee_id"),
+                    "employee_confidence": id_item.get("employee_confidence", 0.0),
+                    "executor_attribution": id_item.get("executor_attribution", "unresolved"),
                 }
 
-        return None
 
-    def _calculate_employee_and_food_distance(self, employee_id: str, food_id: str, data_pkt):
+
+        return generated_events
+
+    def _calculate_employee_and_food_distance(self, employee_id: str, food_id: str, pkt):
         """
         Вычисляет расстояние в пикселях между центром bbox сотрудника (person) и центром bbox еды (food).
 
         Параметры:
             employee_id (str): идентификатор сотрудника (из identities) или track_id (если None/"undefined").
             food_id (str): track_id факта, соответствующего еде.
-            data_pkt (dict): пакет данных камеры (содержит 'facts' и 'identities').
+            pkt (dict): пакет данных камеры (содержит 'facts' и 'identities').
 
         Возвращает:
             float или None: расстояние в пикселях или None, если не удалось найти bbox.
         """
-        facts = data_pkt.get('facts', [])
-        identities = data_pkt.get('identities', [])
+        facts = pkt.get('facts', [])
+        identities = pkt.get('identities', [])
 
         person_bbox = None
 
@@ -171,13 +189,6 @@ class ZoneExitControl(threading.Thread):
         distance = self.__calculate_distance(center_person, center_food)
         return distance
 
-    def _check_data_queue(self):
-        data_pkt = self._input_data_queue.get()
-        if data_pkt is not None:
-            camera_id = data_pkt.get("camera_id", None)
-            if camera_id is not None and self._camera_capture_data[camera_id] == True:
-                self.process_pkt(data_pkt=data_pkt)
-
     def _init_data_capture(self, action_pkt):
         camera_id = action_pkt.get("camera_id", None)
         if camera_id:
@@ -199,28 +210,52 @@ class ZoneExitControl(threading.Thread):
 
         entity_id = employee_id if employee_id else track_id
         entity_type = "employee" if employee_id else "system"  # или "system" для неизвестного
+        action_id = str(uuid.uuid4())
 
         sanitary_event = {
-            "sanitary_event_id": str(uuid.uuid4()),
-            "sanitary_event_type": sanitary_event_type,
-            "severity": SEVERITY_MAP[sanitary_event_type][0],
-            "severity_internal": SEVERITY_MAP[sanitary_event_type][1],
+            "sanitary_event_id": action_id,
+            "sanitary_event_type": zone_exit_event_type,
+            "source_context": None,
+            "target_context": None,
+            "severity": "violation",
+            "severity_internal": "high",
+            "escalation_category": None,
+            "incompatibility_cause": None,
+            "rule_id": None,
             "zone_id": zone_id,
-            "decision_mode": "decision_pending"
+            "employee_id": employee_id,
+            "decision_mode": "SANITARY_VIOLATION_CONFIRMED",
         }
-        return sanitary_event
 
-    def _get_food_id(self, data_pkt):
-        fact = self._get_fact_by_object_class(facts=data_pkt.get("facts", []), object_class='food')
+        return {
+            "event_id": action_id,
+            "timestamp": timestamp,
+            "event_type": "sanitary_event",
+            "camera_id": camera_id,
+            "entity_id": entity_id,
+            "entity_type": entity_type,
+            "confidence": confidence,
+            "time_source": "server_ntp",
+            "late": False,
+            "track_lineage_id": track_lineage_id,
+            "executor_attribution": "unresolved" if not employee_id else "confirmed",
+            "rules_config_version": None,
+            "model_versions": None,
+            "decision_trace": None,
+            "payload": sanitary_event,
+        }
+
+    def _get_food_id(self, pkt):
+        fact = self._get_fact_by_object_class(facts=pkt.get("facts", []), object_class='food')
         if fact is None:
             return None
         food_id = fact.get('track_id', None)
         return food_id
 
-    def _get_employee_id(self, action_pkt, data_pkt):
+    def _get_employee_id(self, action_pkt, pkt):
         employee_id = action_pkt.get("employee_id", None)
         if employee_id is None or employee_id == "undefined":
-            fact = self._get_fact_by_object_class(facts=data_pkt.get("facts", []), object_class='person')
+            fact = self._get_fact_by_object_class(facts=pkt.get("facts", []), object_class='person')
             if fact is None:
                 return None
             employee_id = fact.get('track_id', None)
@@ -236,9 +271,9 @@ class ZoneExitControl(threading.Thread):
         if camera_id in self._camera_capture_data:
             del self._camera_capture_data[camera_id]
 
-    def _clear_started_camera_data(self, camera_id: str):
-        if camera_id in self._started_camera_data:
-            del self._started_camera_data[camera_id]
+    def _clear_data_capture_started(self, camera_id: str):
+        if camera_id in self._data_capture_started:
+            del self._data_capture_started[camera_id]
 
     # Utils bbox
     def __calculate_bbox_center(self, bbox):

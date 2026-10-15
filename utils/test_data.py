@@ -191,6 +191,7 @@ contamination_event = {
         "contamination_type": "raw_food",
         "target_entity": "hands",
         "source_entity": "food",
+        "priority": "high",
         "zone_id": "zone_prep_main"
     }
 }
