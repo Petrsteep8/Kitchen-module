@@ -1,9 +1,15 @@
 import json
+import os
 import queue
 import threading
 import time
 import uuid
-from typing import Optional, Dict
+from collections import deque
+from dataclasses import dataclass, field
+from typing import Optional, Dict, List, Any
+
+import cv2
+
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -24,8 +30,215 @@ config = {
 }
 
 
+# ============================================================================
+# Ring buffer кадров + генерация видео-клипов
+# ============================================================================
+
+@dataclass
+class BufferedFrame:
+    """Кадр с временной меткой."""
+    timestamp: float
+    frame: Any              # numpy.ndarray
+    camera_id: str
+
+
+class FrameRingBuffer:
+    """
+    Потокобезопасный ring buffer кадров по камерам.
+    Хранит последние max_seconds секунд (и не более max_frames кадров).
+    """
+
+    def __init__(self, max_seconds: float = 5.0, max_frames: int = 500):
+        self._buffers: Dict[str, deque] = {}
+        self._max_seconds = max_seconds
+        self._max_frames = max_frames
+        self._lock = threading.Lock()
+
+    def push(self, camera_id: str, timestamp: float, frame) -> None:
+        if frame is None:
+            return
+        with self._lock:
+            if camera_id not in self._buffers:
+                self._buffers[camera_id] = deque(maxlen=self._max_frames)
+            buf = self._buffers[camera_id]
+            buf.append(BufferedFrame(timestamp, frame, camera_id))
+            # вытесняем кадры старше окна
+            cutoff = timestamp - self._max_seconds
+            while buf and buf[0].timestamp < cutoff:
+                buf.popleft()
+
+    def snapshot(self, camera_id: str, start_ts: float, end_ts: float) -> List[BufferedFrame]:
+        """Снимок кадров из буфера в диапазоне [start_ts, end_ts]."""
+        with self._lock:
+            buf = self._buffers.get(camera_id)
+            if not buf:
+                return []
+            return [f for f in buf if start_ts <= f.timestamp <= end_ts]
+
+    def clear(self) -> None:
+        with self._lock:
+            self._buffers.clear()
+
+
+@dataclass
+class PendingClip:
+    """Запрос на клип, ожидающий накопления пост-ролл кадров."""
+    camera_id: str
+    event_type: str
+    violation_id: str
+    trigger_ts: float
+    post_roll_seconds: float
+    pre_roll_frames: List[BufferedFrame] = field(default_factory=list)
+    post_roll_frames: List[BufferedFrame] = field(default_factory=list)
+
+    def is_post_roll_complete(self, current_ts: float) -> bool:
+        return current_ts >= (self.trigger_ts + self.post_roll_seconds)
+
+
+class ClipRecorder:
+    """
+    Управляет генерацией клипов:
+      1) при триггере снимает пре-ролл из ring buffer,
+      2) собирает пост-ролл кадры по мере поступления,
+      3) по завершении окна записывает .mp4.
+    """
+
+    def __init__(
+        self,
+        frame_buffer: FrameRingBuffer,
+        output_dir: str = "./audit_clips",
+        fps: float = 8.0,
+        pre_roll_seconds: float = 5.0,
+        post_roll_seconds: float = 5.0,
+    ):
+        self._buffer = frame_buffer
+        self._output_dir = output_dir
+        self._fps = fps
+        self._pre_roll_seconds = pre_roll_seconds
+        self._post_roll_seconds = post_roll_seconds
+        self._pending: List[PendingClip] = []
+        self._lock = threading.Lock()
+        os.makedirs(self._output_dir, exist_ok=True)
+
+    def schedule_clip(
+        self,
+        camera_id: str,
+        event_type: str,
+        trigger_ts: float,
+        extra_id: Optional[str] = None,
+    ) -> str:
+        """
+        Регистрирует запрос на клип. Снимок пре-ролл берётся из ring buffer.
+        Возвращает violation_id, который также используется в имени файла.
+        """
+        violation_id = extra_id or f"{camera_id}_{event_type}_{int(trigger_ts * 1000)}"
+
+        with self._lock:
+            start_ts = trigger_ts - self._pre_roll_seconds
+            pre_frames = self._buffer.snapshot(camera_id, start_ts, trigger_ts)
+            pending = PendingClip(
+                camera_id=camera_id,
+                event_type=event_type,
+                violation_id=violation_id,
+                trigger_ts=trigger_ts,
+                post_roll_seconds=self._post_roll_seconds,
+                pre_roll_frames=pre_frames,
+            )
+            self._pending.append(pending)
+
+        logger.info(
+            "Clip scheduled: id=%s camera=%s event=%s pre_roll_frames=%d",
+            violation_id, camera_id, event_type, len(pre_frames)
+        )
+        return violation_id
+
+    def update(self, camera_id: str, timestamp: float, frame) -> None:
+        """
+        Вызывается на каждом кадре. Добавляет кадр в пост-ролл всех активных
+        запросов для данной камеры. По завершении окна записывает клип.
+        """
+        if frame is None:
+            return
+
+        completed: List[PendingClip] = []
+        with self._lock:
+            for pending in self._pending:
+                if pending.camera_id != camera_id:
+                    continue
+                if timestamp < pending.trigger_ts:
+                    continue
+                if timestamp <= pending.trigger_ts + pending.post_roll_seconds:
+                    pending.post_roll_frames.append(
+                        BufferedFrame(timestamp, frame, camera_id)
+                    )
+                if pending.is_post_roll_complete(timestamp):
+                    completed.append(pending)
+            for p in completed:
+                self._pending.remove(p)
+
+        # запись вне блокировки
+        for pending in completed:
+            try:
+                self._write_clip(pending)
+            except Exception as e:
+                logger.error("Failed to write clip %s: %s", pending.violation_id, e)
+
+    def _write_clip(self, pending: PendingClip) -> Optional[str]:
+        all_frames = pending.pre_roll_frames + pending.post_roll_frames
+        if not all_frames:
+            logger.warning("No frames to write for clip %s", pending.violation_id)
+            return None
+
+        first = next((f.frame for f in all_frames if f.frame is not None), None)
+        if first is None:
+            return None
+        h, w = first.shape[:2]
+
+        filepath = os.path.join(self._output_dir, f"{pending.violation_id}.mp4")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(filepath, fourcc, self._fps, (w, h))
+
+        try:
+            for bf in all_frames:
+                if bf.frame is None:
+                    continue
+                f = bf.frame
+                if f.shape[1] != w or f.shape[0] != h:
+                    f = cv2.resize(f, (w, h))
+                writer.write(f)
+        finally:
+            writer.release()
+
+        logger.info(
+            "Clip saved: %s (%d frames, ~%.1fs)",
+            filepath, len(all_frames), len(all_frames) / self._fps
+        )
+        return filepath
+
+    def flush(self) -> None:
+        """Записывает оставшиеся клипы (например, при остановке модуля)."""
+        with self._lock:
+            pending = list(self._pending)
+            self._pending.clear()
+        for p in pending:
+            try:
+                self._write_clip(p)
+            except Exception as e:
+                logger.error("Failed to flush clip %s: %s", p.violation_id, e)
+
+
+# ============================================================================
+# UniformBehaviorRules
+# ============================================================================
+
 class UniformBehaviorRules(threading.Thread):
-    def __init__(self, input_queue: queue.Queue, out_queue: queue.Queue, intrusion_config: Dict):
+    def __init__(
+        self,
+        input_queue: queue.Queue,
+        out_queue: queue.Queue,
+        intrusion_config: Dict,
+        clip_config: Optional[Dict] = None,
+    ):
         super().__init__(daemon=True)
         self.stop_event = threading.Event()
 
@@ -51,6 +264,26 @@ class UniformBehaviorRules(threading.Thread):
         self._known_cameras = []
         self._generated_violations_per_employee = {}
 
+        # ---- Ring buffer + clip recorder ----
+        clip_config = clip_config or {}
+        pre_roll = clip_config.get("pre_roll_seconds", 5.0)
+        post_roll = clip_config.get("post_roll_seconds", 5.0)
+
+        self._pre_roll_seconds = pre_roll
+        self._post_roll_seconds = post_roll
+
+        self._frame_buffer = FrameRingBuffer(
+            max_seconds=pre_roll + 1.0,
+            max_frames=clip_config.get("max_frames", 500),
+        )
+        self._clip_recorder = ClipRecorder(
+            frame_buffer=self._frame_buffer,
+            output_dir=clip_config.get("output_dir", "./audit_clips"),
+            fps=clip_config.get("fps", 8.0),
+            pre_roll_seconds=pre_roll,
+            post_roll_seconds=post_roll,
+        )
+
     def run(self):
         while not self.stop_event.is_set():
             try:
@@ -62,51 +295,62 @@ class UniformBehaviorRules(threading.Thread):
 
     def stop(self):
         self.stop_event.set()
+        try:
+            self._clip_recorder.flush()
+        except Exception as e:
+            logger.warning("Error flushing clips on stop: %s", e)
+
+    # ------------------------------------------------------------------------
+    # Обработка пакета
+    # ------------------------------------------------------------------------
 
     def process_pkt(self, pkt):
         if pkt is None:
             return
 
-        if pkt["camera_id"] not in self._known_cameras:
-            self._is_no_cap_detected[pkt["camera_id"]] = False
-            self._is_no_apron_detected[pkt["camera_id"]] = False
-            self._is_no_glove_detected[pkt["camera_id"]] = False
-            self._is_face_touch_detected[pkt["camera_id"]] = False
-            self._is_phone_usage_detected[pkt["camera_id"]] = False
-            self._known_cameras.append(pkt["camera_id"])
+        # --- 1. Кладём кадр в ring buffer и обновляем активные клипы ---
+        camera_id = pkt.get("camera_id", "default")
+        frame = pkt.get("frame_bgr")
+        now = time.time()
+        if frame is not None:
+            self._frame_buffer.push(camera_id, now, frame)
+            self._clip_recorder.update(camera_id, now, frame)
+
+        if camera_id not in self._known_cameras:
+            self._is_no_cap_detected[camera_id] = False
+            self._is_no_apron_detected[camera_id] = False
+            self._is_no_glove_detected[camera_id] = False
+            self._is_face_touch_detected[camera_id] = False
+            self._is_phone_usage_detected[camera_id] = False
+            self._known_cameras.append(camera_id)
 
         events = []
 
         no_cap = self._detect_no_cap(pkt=pkt)
         if no_cap is not None:
-            for item in no_cap:
-                events.append(item)
+            events.extend(no_cap)
 
         no_gloves = self._detect_no_gloves(pkt=pkt)
         if no_gloves is not None:
-            for item in no_gloves:
-                events.append(item)
+            events.extend(no_gloves)
 
         no_apron = self._detect_no_apron(pkt=pkt)
         if no_apron is not None:
-            for item in no_apron:
-                events.append(item)
+            events.extend(no_apron)
 
         phone_usage = self._detect_phone_usage(pkt=pkt)
         if phone_usage is not None:
-            for item in phone_usage:
-                events.append(item)
+            events.extend(phone_usage)
 
-        if events is not None and len(events) > 0:
+        if events:
             self._emit_events(events=events)
 
     def _emit_events(self, events):
-        if not events or len(events) == 0:
+        if not events:
             return
-
-        import json
         for event in events:
-            logger.info("ACTION EVENT JSON:\n%s", json.dumps(event, ensure_ascii=False, indent=2, default=str))
+            logger.info("ACTION EVENT JSON:\n%s",
+                        json.dumps(event, ensure_ascii=False, indent=2, default=str))
             if self.out_queue is not None:
                 try:
                     self.out_queue.put_nowait(event)
@@ -116,19 +360,35 @@ class UniformBehaviorRules(threading.Thread):
                     except Exception:
                         logger.warning("Failed to push action event to out_queue")
 
-    def _generate_sanitary_event(self,
-                                 event_type: str,
-                                 zone_id: str,
-                                 camera_id: str,
-                                 employee_id: str,
-                                 track_id: str,
-                                 track_lineage_id: Optional[str],
-                                 confidence: float
-                                 ) -> Dict:
+    # ------------------------------------------------------------------------
+    # Генерация санитарного события + планирование клипа
+    # ------------------------------------------------------------------------
+
+    def _generate_sanitary_event(
+        self,
+        event_type: str,
+        zone_id: str,
+        camera_id: str,
+        employee_id: str,
+        track_id: str,
+        track_lineage_id: Optional[str],
+        confidence: float,
+    ) -> Dict:
 
         entity_id = employee_id if employee_id else track_id
-        entity_type = "employee" if employee_id else "system"  # или "system" для неизвестного
+        entity_type = "employee" if employee_id else "system"
         action_id = str(uuid.uuid4())
+
+        # --- Планируем клип (5 сек до + 5 сек после) ---
+        try:
+            self._clip_recorder.schedule_clip(
+                camera_id=camera_id,
+                event_type=event_type,
+                trigger_ts=time.time(),
+                extra_id=action_id,
+            )
+        except Exception as e:
+            logger.warning("Failed to schedule clip for %s: %s", event_type, e)
 
         sanitary_event = {
             "sanitary_event_id": action_id,
@@ -154,11 +414,16 @@ class UniformBehaviorRules(threading.Thread):
             "rules_config_version": None,
             "model_versions": None,
             "decision_trace": None,
+            "audit_clip_id": action_id,   # ссылка на клип (по соглашению — совпадает с id)
             "payload": sanitary_event,
         }
 
+    # ------------------------------------------------------------------------
+    # Детекторы (без изменений в логике)
+    # ------------------------------------------------------------------------
+
     def _detect_no_cap(self, pkt):
-        cam_id = pkt.get("cam_id", "default")
+        cam_id = pkt.get("camera_id", "default")
         zone_id = pkt.get("zone_id", "")
         facts = pkt["facts"]
         identities = pkt["identities"]
@@ -169,7 +434,6 @@ class UniformBehaviorRules(threading.Thread):
 
         generated_events = []
 
-        # строим маппинг track_lineage_id -> employee_id из identities
         identity_map: Dict[str, Dict] = {}
         for id_item in identities:
             lineage_id = id_item.get("track_lineage_id")
@@ -199,7 +463,7 @@ class UniformBehaviorRules(threading.Thread):
                 self._is_no_cap_detected[cam_id] = False
 
         time_since_last_no_cap_violation = time.time() - self._generated_violations_per_employee.get(employee_id, 0)
-        violation_time = time.time() - self._no_cap_detected_timestamp.get(cam_id,0)
+        violation_time = time.time() - self._no_cap_detected_timestamp.get(cam_id, 0)
 
         if (self._is_no_cap_detected.get(cam_id) and violation_time > self._T_uniform_confirm_sec
                 and time_since_last_no_cap_violation > self._T_uniform_confirm_sec * 5):
@@ -211,18 +475,16 @@ class UniformBehaviorRules(threading.Thread):
                 employee_id=employee_id,
                 confidence=employee_confidence,
                 track_id=track_id,
-                track_lineage_id=track_linage_id
+                track_lineage_id=track_linage_id,
             )
-
             self._generated_violations_per_employee[employee_id] = time.time()
-
             generated_events.append(event)
             self._is_no_cap_detected[cam_id] = False
 
         return generated_events
 
     def _detect_no_gloves(self, pkt):
-        cam_id = pkt.get("cam_id", "default")
+        cam_id = pkt.get("camera_id", "default")
         zone_id = pkt.get("zone_id", "")
         facts = pkt["facts"]
         identities = pkt["identities"]
@@ -233,7 +495,6 @@ class UniformBehaviorRules(threading.Thread):
 
         generated_events = []
 
-        # строим маппинг track_lineage_id -> employee_id из identities
         identity_map: Dict[str, Dict] = {}
         for id_item in identities:
             lineage_id = id_item.get("track_lineage_id")
@@ -275,18 +536,16 @@ class UniformBehaviorRules(threading.Thread):
                 employee_id=employee_id,
                 confidence=employee_confidence,
                 track_id=track_id,
-                track_lineage_id=track_linage_id
+                track_lineage_id=track_linage_id,
             )
-
             self._generated_violations_per_employee[employee_id] = time.time()
-
             generated_events.append(event)
             self._is_no_glove_detected[cam_id] = False
 
         return generated_events
 
     def _detect_no_apron(self, pkt):
-        cam_id = pkt.get("cam_id", "default")
+        cam_id = pkt.get("camera_id", "default")
         zone_id = pkt.get("zone_id", "")
         facts = pkt["facts"]
         identities = pkt["identities"]
@@ -297,7 +556,6 @@ class UniformBehaviorRules(threading.Thread):
 
         generated_events = []
 
-        # строим маппинг track_lineage_id -> employee_id из identities
         identity_map: Dict[str, Dict] = {}
         for id_item in identities:
             lineage_id = id_item.get("track_lineage_id")
@@ -339,18 +597,16 @@ class UniformBehaviorRules(threading.Thread):
                 employee_id=employee_id,
                 confidence=employee_confidence,
                 track_id=track_id,
-                track_lineage_id=track_linage_id
+                track_lineage_id=track_linage_id,
             )
-
             self._generated_violations_per_employee[employee_id] = time.time()
-
             generated_events.append(event)
             self._is_no_apron_detected[cam_id] = False
 
         return generated_events
 
     def _detect_phone_usage(self, pkt):
-        cam_id = pkt.get("cam_id", "")
+        cam_id = pkt.get("camera_id", "")
         zone_id = pkt.get("zone_id", "")
         facts = pkt["facts"]
         identities = pkt["identities"]
@@ -361,7 +617,6 @@ class UniformBehaviorRules(threading.Thread):
 
         generated_events = []
 
-        # строим маппинг track_lineage_id -> employee_id из identities
         identity_map: Dict[str, Dict] = {}
         for id_item in identities:
             lineage_id = id_item.get("track_lineage_id")
@@ -391,10 +646,14 @@ class UniformBehaviorRules(threading.Thread):
         person_bbox = self._parse_bbox(person["bbox"])
         phone_bbox = self._parse_bbox(phone["bbox"])
         hands_bbox = self._parse_bbox(hands["bbox"])
+        if person_bbox is None or phone_bbox is None or hands_bbox is None:
+            return None
+
         person_bbox_center = self._calculate_bbox_center(person_bbox)
         hands_bbox_center = self._calculate_bbox_center(hands_bbox)
 
-        if self._iou(hands_bbox, phone_bbox) >= 0.5 > self._calculate_distance(person_bbox_center, hands_bbox_center):
+        if (self._iou(hands_bbox, phone_bbox) >= 0.5
+                > self._calculate_distance(person_bbox_center, hands_bbox_center)):
             if not self._is_phone_usage_detected.get(cam_id, False):
                 self._is_phone_usage_detected[cam_id] = True
                 self._phone_usage_timestamp[cam_id] = time.time()
@@ -404,7 +663,8 @@ class UniformBehaviorRules(threading.Thread):
         time_since_last_phone_usage_violation = time.time() - self._generated_violations_per_employee.get(employee_id, 0)
         violation_time = time.time() - self._phone_usage_timestamp.get(cam_id, 0)
 
-        if (self._is_phone_usage_detected.get(cam_id, False) and violation_time > self._T_uniform_confirm_sec
+        if (self._is_phone_usage_detected.get(cam_id, False)
+                and violation_time > self._T_uniform_confirm_sec
                 and time_since_last_phone_usage_violation > self._T_uniform_confirm_sec * 5):
 
             event = self._generate_sanitary_event(
@@ -414,91 +674,32 @@ class UniformBehaviorRules(threading.Thread):
                 employee_id=employee_id,
                 confidence=employee_confidence,
                 track_id=track_id,
-                track_lineage_id=track_linage_id
+                track_lineage_id=track_linage_id,
             )
-
             generated_events.append(event)
             self._is_phone_usage_detected[cam_id] = False
 
         return generated_events
 
-    def _calculate_employee_and_stuff_distance(self, employee_id: str, stuff_id: str, data_pkt):
-        """
-        Вычисляет расстояние в пикселях между центром bbox сотрудника (person) и центром bbox еды (food).
+    def _detect_face_touch(self, pkt):
+        # TODO: реализовать при необходимости
+        pass
 
-        Параметры:
-            employee_id (str): идентификатор сотрудника (из identities) или track_id (если None/"undefined").
-            stuff_id (str): track_id факта, соответствующего еде.
-            data_pkt (dict): пакет данных камеры (содержит 'facts' и 'identities').
+    # ------------------------------------------------------------------------
+    # Утилиты
+    # ------------------------------------------------------------------------
 
-        Возвращает:
-            float или None: расстояние в пикселях или None, если не удалось найти bbox.
-        """
-        facts = data_pkt.get('facts', [])
-        identities = data_pkt.get('identities', [])
-
-        person_bbox = None
-
-        # 1. Определяем bbox человека
-        if employee_id is not None and employee_id != "undefined":
-            # Ищем identity по employee_id
-            found_identity = None
-            for ident in identities:
-                if ident.get('employee_id') == employee_id:
-                    found_identity = ident
-                    break
-
-            if found_identity:
-                lineage_id = found_identity.get('track_lineage_id')
-                if lineage_id:
-                    # Ищем факт person с таким track_lineage_id
-                    for fact in facts:
-                        if (fact.get('track_lineage_id') == lineage_id and
-                                fact.get('object_class') == 'person'):
-                            person_bbox = fact.get('bbox')
-                            break
-            # Если identity не найден, person_bbox остаётся None
-        else:
-            # employee_id интерпретируется как track_id (если не None)
-            if employee_id is not None:
-                for fact in facts:
-                    if fact.get('track_id') == employee_id and fact.get('object_class') == 'person':
-                        person_bbox = fact.get('bbox')
-                        break
-
-        if person_bbox is None:
-            return None
-
-        # 2. Определяем bbox еды по track_id
-        food_bbox = None
+    def _get_fact_by_object_class(self, facts, object_class):
         for fact in facts:
-            if fact.get('track_id') == stuff_id:
-                food_bbox = fact.get('bbox')
-                break
-
-        if food_bbox is None:
-            return None
-
-        # 3. Валидация bbox
-        person_bbox_valid = self._parse_bbox(person_bbox)
-        food_bbox_valid = self._parse_bbox(food_bbox)
-        if person_bbox_valid is None or food_bbox_valid is None:
-            return None
-
-        # 4. Вычисление центров
-        center_person = self.__calculate_bbox_center(person_bbox_valid)
-        center_food = self.__calculate_bbox_center(food_bbox_valid)
-
-        # 5. Расстояние Евклида
-        distance = self.__calculate_distance(center_person, center_food)
-        return distance
+            if fact["object_class"] == object_class:
+                return fact
+        return None
 
     def _parse_bbox(self, bbox):
         try:
             if bbox is None:
                 return None
             if isinstance(bbox, str):
-                import json
                 bbox = json.loads(bbox)
             vals = [float(x) for x in bbox]
             if len(vals) != 4:
@@ -510,21 +711,12 @@ class UniformBehaviorRules(threading.Thread):
         except Exception:
             return None
 
-    def _get_fact_by_object_class(self, facts, object_class):
-        for fact in facts:
-            if fact["object_class"] == object_class:
-                return fact
-        return None
-
     def _calculate_bbox_center(self, bbox):
         x1, y1, x2, y2 = bbox
         return (x1 + x2) / 2.0, (y1 + y2) / 2.0
 
     def _calculate_distance(self, p1, p2):
         return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
-
-    def _detect_face_touch(self, pkt):
-        pass
 
     def _iou(self, boxA, boxB):
         xA = max(boxA[0], boxB[0])
@@ -544,9 +736,29 @@ class UniformBehaviorRules(threading.Thread):
             return 0.0
         return inter / union
 
-    def __calculate_bbox_center(self, bbox):
-        x1, y1, x2, y2 = bbox
-        return (x1 + x2) / 2.0, (y1 + y2) / 2.0
 
-    def __calculate_distance(self, p1, p2):
-        return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
+if __name__ == "__main__":
+    input_q = queue.Queue()
+    output_q = queue.Queue()
+
+    cfg = {
+        "T_uniform_confirm_sec": 1.0,
+        "employee_confidence_floor": 0.9,
+        "employee_id_confidence_floor": 0.6,
+    }
+
+    clip_cfg = {
+        "pre_roll_seconds": 5.0,
+        "post_roll_seconds": 5.0,
+        "fps": 8.0,
+        "output_dir": "./audit_clips",
+        "max_frames": 500,
+    }
+
+    module = UniformBehaviorRules(
+        input_queue=input_q,
+        out_queue=output_q,
+        intrusion_config=cfg,
+        clip_config=clip_cfg,
+    )
+    module.start()
