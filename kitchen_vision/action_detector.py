@@ -84,6 +84,8 @@ class ActionDetector(threading.Thread):
         self.__HAND_ITEM_DISTANCE_PX = hand_item_distance_px
         self.__HAND_OVERLAP_IOU = hand_overlap_iou_threshold
 
+        self.__camera_action_attachments: Dict[str, str] = {}
+
         self.__work_zone_polygons = work_zone_polygons or {}
 
         for cam in cams:
@@ -369,7 +371,8 @@ class ActionDetector(threading.Thread):
                             self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}_timestamp_start"] = time.time()
                         if self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}"] >= 4 \
                                 and time.time() - self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}_timestamp_start"] <= 60:
-                            self.make_data_quality_packet(pkt=pkt, reason="action_card_not_found")
+                            data_event = self.make_data_quality_packet(pkt=pkt, reason="action_card_not_found")
+                            self.__emit_events(events=[data_event])
                             self.__action_card_not_found_total[f"{action["type"]}_{action["key_object_class"]}"] = 0
                         return None
 
@@ -523,6 +526,14 @@ class ActionDetector(threading.Thread):
 
         return (now - state["key_object_lost_since"]) >= self.__T_KEY_OBJECT_LOST_CONFIRM
 
+    def __attach_camera_to_action(self, camera_id: str, action_id: str):
+        if camera_id in self.__cameras and action_id is not None:
+            self.__camera_action_attachments[camera_id] = action_id
+
+    def __remove_camera_action_attachment(self, camera_id: str):
+        if camera_id in self.__cameras and self.__camera_action_attachments.get(camera_id) is not None:
+            del self.__camera_action_attachments[camera_id]
+
     def make_action_start_packet(self, camera_id: str, pkt: Dict) -> Dict[str, Any]:
         d = self.__detected_actions[camera_id]
 
@@ -542,6 +553,8 @@ class ActionDetector(threading.Thread):
         employee_id = d.get("employee_id", None)
         obj = pkt.get("objects", [])[0]
 
+        self.__attach_camera_to_action(camera_id=camera_id, action_id=action_id)
+
         action_start = {
             "action_id": action_id,
             "employee_id": d.get("employee_id"),
@@ -553,7 +566,7 @@ class ActionDetector(threading.Thread):
         return {
             "event_id": action_id,
             "timestamp": timestamp,
-            "event_type": "action_end",
+            "event_type": "action_start",
             "camera_id": camera_id,
             "entity_id": employee_id,
             "entity_type": "employee",
@@ -598,9 +611,11 @@ class ActionDetector(threading.Thread):
         if carrying_food:
             carrying_type = "food"
 
-        action_id = str(uuid.uuid4())
+        action_id = self.__camera_action_attachments.get(camera_id, str(uuid.uuid4()))
         timestamp = pkt.get("timestamp", time.time())
         employee_id = d.get("employee_id", None)
+
+        self.__remove_camera_action_attachment(camera_id=camera_id)
 
         action_end = {
             "action_id": action_id,
