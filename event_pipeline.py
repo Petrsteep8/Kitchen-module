@@ -1,9 +1,6 @@
-import json
 import queue
 import threading
 import logging
-import time
-import uuid
 from typing import Optional, Dict, Any, List
 
 logging.basicConfig(level=logging.INFO)
@@ -186,6 +183,34 @@ EVENTS_WITH_NO_TTL = [
 ]
 
 
+def choose_event_by_priority(event_data_for_fsm_transition: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if len(event_data_for_fsm_transition) == 0:
+        return None
+    return min(event_data_for_fsm_transition, key=lambda e: e["priority"])
+
+
+def validate_event_structure(normalized_event: Dict) -> bool:
+    if not normalized_event.get("event_id"):
+        return False
+    if not normalized_event.get("event_type"):
+        return False
+    if not normalized_event.get("timestamp"):
+        return False
+    if not normalized_event.get("camera_id"):
+        return False
+    if not normalized_event.get("entity_id"):
+        return False
+    if not normalized_event.get("entity_type"):
+        return False
+    if not normalized_event.get("confidence"):
+        return False
+    if not normalized_event.get("time_source"):
+        return False
+    if not normalized_event.get("payload"):
+        return False
+    return True
+
+
 class EventPipeline(threading.Thread):
     def __init__(self, input_queue: queue.Queue):
         super().__init__(daemon=True)
@@ -231,27 +256,6 @@ class EventPipeline(threading.Thread):
                     pass
             except queue.Empty:
                 continue
-
-    def validate_event_structure(self, event: Dict) -> bool:
-        if not event.get("event_id"):
-            return False
-        if not event.get("event_type"):
-            return False
-        if not event.get("timestamp"):
-            return False
-        if not event.get("camera_id"):
-            return False
-        if not event.get("entity_id"):
-            return False
-        if not event.get("entity_type"):
-            return False
-        if not event.get("confidence"):
-            return False
-        if not event.get("time_source"):
-            return False
-        if not event.get("payload"):
-            return False
-        return True
 
     def _get_fsm(self, entity_type: str):
         """Получение FSM для сущности"""
@@ -359,12 +363,6 @@ class EventPipeline(threading.Thread):
             "priority": priority,
         }
 
-    def choose_event_by_priority(self, event_data_for_fsm_transition: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        if len(event_data_for_fsm_transition) > 0:
-            lst.sort(key=lambda e: event["priority"])
-
-        return lst[0]
-
     def choose_fsm_transition(self, event_data_for_fsm_transition):
         target_entities = event_data_for_fsm_transition.get("target_entities")
         event_type = event_data_for_fsm_transition.get("event_type")
@@ -408,7 +406,7 @@ class EventPipeline(threading.Thread):
 
     def process_event(self, normalized_event: Dict) -> None:
         # Шаг 1: Валидация структуры входного события
-        if not self.validate_event_structure(event=normalized_event):
+        if not validate_event_structure(normalized_event=normalized_event):
             logger.warning("Event structure validation failed, skipping...")
             return
 
@@ -470,7 +468,7 @@ class EventPipeline(threading.Thread):
 
 
         # Шаг 6: APPLY_FSM_TRANSITION -> fsm
-        most_important_event = self.choose_event_by_priority(event_data_for_fsm_transition)
+        most_important_event = choose_event_by_priority(event_data_for_fsm_transition)
         self.choose_fsm_transition(event_data_for_fsm_transition=most_important_event)
 
     def stop(self) -> None:
@@ -508,7 +506,7 @@ if __name__ == "__main__":
     for event in lst:
         print(event)
 
-    a = event_pipeline.choose_event_by_priority(event_data_for_fsm_transition=lst)
+    a = choose_event_by_priority(event_data_for_fsm_transition=lst)
     print('\n', a)
     event_pipeline.choose_fsm_transition(event_data_for_fsm_transition=a)
 
